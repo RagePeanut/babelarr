@@ -4,9 +4,10 @@ Given the posters TMDB knows about for a title (each tagged with a language, or
 "no language"/textless), the title's original language, and a ``POSTER_RULES``
 rule set, decide which poster to apply.
 
-A poster preference may be a concrete language code or the ``textless`` token,
-which maps to TMDB's "no language / not specified" posters. NOTE: because TMDB
-is community-maintained, a poster tagged "no language" is not *guaranteed* to be
+A poster preference may be a concrete language code, the ``original`` token
+(the poster in the title's original language), or the ``textless`` token (TMDB's
+"no language / not specified" posters). NOTE: because TMDB is
+community-maintained, a poster tagged "no language" is not *guaranteed* to be
 free of title text — it is only categorized that way.
 """
 
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
 from .langcodes import normalize
-from .rules import RuleSet, TOKEN_TEXTLESS
+from .rules import RuleSet, TOKEN_ORIGINAL, TOKEN_TEXTLESS
 
 
 @dataclass(frozen=True)
@@ -41,9 +42,10 @@ def select_poster(
 
     The first matching rule (by original language) is authoritative. Its
     preferences are tried in order; for each, the highest-voted matching poster
-    is chosen. ``textless`` matches posters with no language. If the matched
-    rule yields nothing available, returns ``None`` (leave untouched) rather
-    than falling through to ``default``.
+    is chosen. ``original`` resolves to the title's original language;
+    ``textless`` matches posters with no language. If the matched rule yields
+    nothing available, returns ``None`` (leave untouched) rather than falling
+    through to ``default``.
     """
     prefs = rules.match(original_language)
     if prefs is None:
@@ -53,7 +55,8 @@ def select_poster(
         if want == TOKEN_TEXTLESS:
             candidates = [p for p in posters if normalize(p.language_code) is None]
         else:
-            want_norm = normalize(want)
+            want_lang = original_language if want == TOKEN_ORIGINAL else want
+            want_norm = normalize(want_lang)
             if want_norm is None:
                 continue
             candidates = [

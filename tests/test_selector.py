@@ -124,7 +124,7 @@ def _sub(id, lang, forced=False):
 def test_english_audio_french_subs_present():
     rules = _subs("eng:fre;default:fre,eng")
     subs = [_sub(10, "fre"), _sub(11, "eng")]
-    sel = select_subtitle(subs, "eng", "eng", rules)
+    sel = select_subtitle(subs, "eng", rules)
     assert sel.subtitle_stream_id == 10
     assert not sel.disable_subtitles
 
@@ -134,7 +134,7 @@ def test_matched_rule_but_missing_leaves_untouched():
     # NOT fallthrough to default).
     rules = _subs("eng:fre;default:fre,eng")
     subs = [_sub(11, "eng")]
-    sel = select_subtitle(subs, "eng", "eng", rules)
+    sel = select_subtitle(subs, "eng", rules)
     assert sel.subtitle_stream_id is None
     assert not sel.disable_subtitles
 
@@ -142,7 +142,7 @@ def test_matched_rule_but_missing_leaves_untouched():
 def test_off_token_forces_subtitles_off():
     rules = _subs("fre:off;default:fre,eng")
     subs = [_sub(10, "fre"), _sub(11, "eng")]
-    sel = select_subtitle(subs, "fre", "fre", rules)
+    sel = select_subtitle(subs, "fre", rules)
     assert sel.disable_subtitles
 
 
@@ -150,30 +150,29 @@ def test_no_match_leaves_untouched():
     # No rule for 'jpn' and no default -> untouched.
     rules = _subs("eng:fre")
     subs = [_sub(10, "fre")]
-    sel = select_subtitle(subs, "jpn", "jpn", rules)
+    sel = select_subtitle(subs, "jpn", rules)
     assert sel.subtitle_stream_id is None
     assert not sel.disable_subtitles
 
 
-def test_original_token_subtitles():
-    rules = _subs("eng:original")
-    subs = [_sub(10, "jpn"), _sub(11, "eng")]
-    # eng audio, original language japanese -> pick japanese subs
-    sel = select_subtitle(subs, "eng", "jpn", rules)
-    assert sel.subtitle_stream_id == 10
+def test_original_token_rejected_for_subtitles():
+    import pytest
+    from babelarr.rules import RuleError
+    with pytest.raises(RuleError):
+        _subs("eng:original")
 
 
 def test_default_used_for_other_audio():
     rules = _subs("eng:fre;default:fre,eng")
     subs = [_sub(11, "eng")]
-    sel = select_subtitle(subs, "jpn", "jpn", rules)
+    sel = select_subtitle(subs, "jpn", rules)
     assert sel.subtitle_stream_id == 11
 
 
 def test_prefers_non_forced_subtitle():
     rules = _subs("eng:fre")
     subs = [_sub(10, "fre", forced=True), _sub(11, "fre", forced=False)]
-    sel = select_subtitle(subs, "eng", "eng", rules)
+    sel = select_subtitle(subs, "eng", rules)
     assert sel.subtitle_stream_id == 11
 
 

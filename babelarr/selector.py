@@ -17,9 +17,10 @@ Subtitle semantics (Babelarr grammar):
   * No rule matches (and no ``default``)      -> leave subtitles untouched.
   * Matched rule's preferences, first available wins.
   * ``off`` token in a matched rule           -> force subtitles OFF.
-  * ``original`` token                         -> original-language subtitle.
   * Matched rule but none of its preferences present -> leave untouched
     (let Plex handle it); does NOT fall through to ``default``.
+  * No ``original`` token: rules key on the played audio, so concrete language
+    keys plus ``default`` already cover every case.
 """
 
 from __future__ import annotations
@@ -128,14 +129,14 @@ def select_audio(
 def select_subtitle(
     subtitles: Sequence[SubtitleStreamView],
     audio_language: Optional[str],
-    original_language: Optional[str],
     rules: RuleSet,
 ) -> Selection:
     """Decide the subtitle stream given the chosen audio language and rules.
 
     The rule is matched on the audio language that will actually play. Each
-    preference is resolved against available subtitle streams; ``off`` forces
-    subtitles off; ``original`` resolves to the title's original language.
+    preference is a concrete subtitle language; ``off`` forces subtitles off.
+    (Subtitles have no ``original`` token: with rules keyed on the played audio,
+    concrete language keys plus ``default`` already cover every case.)
     """
     prefs = rules.match(audio_language)
     if prefs is None:
@@ -144,8 +145,7 @@ def select_subtitle(
     for want in prefs:
         if want == TOKEN_OFF:
             return Selection(None, None, disable_subtitles=True)
-        want_lang = original_language if want == TOKEN_ORIGINAL else want
-        want_norm = normalize(want_lang)
+        want_norm = normalize(want)
         if want_norm is None:
             continue
         candidates = [s for s in subtitles if normalize(s.language_code) == want_norm]
@@ -188,7 +188,7 @@ def select_for_part(
         if playing_lang is None:
             playing_lang = original_language
 
-    sub_sel = select_subtitle(subtitles, playing_lang, original_language, subtitle_rules)
+    sub_sel = select_subtitle(subtitles, playing_lang, subtitle_rules)
     return Selection(
         audio_stream_id=audio_id,
         subtitle_stream_id=sub_sel.subtitle_stream_id,
