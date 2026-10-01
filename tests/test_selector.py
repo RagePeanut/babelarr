@@ -7,9 +7,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest  # noqa: E402
 
-from babelarr.config import SUBTITLE_TOKENS  # noqa: E402
+from babelarr.config import AUDIO_TOKENS, SUBTITLE_TOKENS  # noqa: E402
 from babelarr.langcodes import normalize, same_language  # noqa: E402
-from babelarr.rules import parse_inline  # noqa: E402
+from babelarr.rules import RuleSet, parse_inline  # noqa: E402
 from babelarr.selector import (  # noqa: E402
     AudioStreamView,
     SubtitleStreamView,
@@ -21,6 +21,14 @@ from babelarr.selector import (  # noqa: E402
 
 def _subs(value):
     return parse_inline(value, SUBTITLE_TOKENS)
+
+
+def _audio_rules(value):
+    return parse_inline(value, AUDIO_TOKENS)
+
+
+# OV preset: always original-language audio.
+_OV = parse_inline("default:original", AUDIO_TOKENS)
 
 
 # --- normalization ---------------------------------------------------------
@@ -43,32 +51,68 @@ def test_same_language():
 
 # --- audio selection -------------------------------------------------------
 
-def _audio(id, lang, ch, codec="ac3"):
-    return AudioStreamView(id=id, language_code=lang, channels=ch, codec=codec)
+def _audio(id, lang, ch, codec="ac3", default=False):
+    return AudioStreamView(
+        id=id, language_code=lang, channels=ch, codec=codec, is_default=default
+    )
 
 
-def test_audio_picks_original_language_highest_channels():
+def test_audio_ov_picks_original_language_highest_channels():
     audios = [_audio(1, "eng", 6), _audio(2, "jpn", 2), _audio(3, "jpn", 6)]
-    assert select_audio(audios, "ja", None) == 3
+    assert select_audio(audios, "ja", _OV, None) == 3
 
 
 def test_audio_channel_cap():
     audios = [_audio(1, "jpn", 2), _audio(2, "jpn", 6), _audio(3, "jpn", 8)]
-    assert select_audio(audios, "ja", 6) == 2
+    assert select_audio(audios, "ja", _OV, 6) == 2
 
 
 def test_audio_cap_excludes_all_falls_back_to_lowest():
     audios = [_audio(1, "jpn", 8), _audio(2, "jpn", 6)]
-    assert select_audio(audios, "ja", 2) == 2
+    assert select_audio(audios, "ja", _OV, 2) == 2
 
 
 def test_audio_no_match_returns_none():
-    assert select_audio([_audio(1, "eng", 6)], "ko", None) is None
+    assert select_audio([_audio(1, "eng", 6)], "ko", _OV, None) is None
 
 
 def test_audio_codec_tiebreak():
     audios = [_audio(1, "eng", 6, codec="ac3"), _audio(2, "eng", 6, codec="truehd")]
-    assert select_audio(audios, "en", None) == 2
+    assert select_audio(audios, "en", _OV, None) == 2
+
+
+def test_audio_no_rules_leaves_untouched():
+    audios = [_audio(1, "jpn", 6)]
+    assert select_audio(audios, "ja", RuleSet(), None) is None
+
+
+def test_audio_native_dub_preference():
+    # Watcher wants everything in German; English film has a German dub.
+    rules = _audio_rules("default:deu")
+    audios = [_audio(1, "eng", 6), _audio(2, "deu", 6)]
+    assert select_audio(audios, "en", rules, None) == 2
+
+
+def test_audio_rule_fallback_to_original():
+    # Prefer German dub, else the original-language track.
+    rules = _audio_rules("default:deu,original")
+    audios = [_audio(1, "jpn", 6), _audio(2, "eng", 6)]  # no German
+    assert select_audio(audios, "ja", rules, None) == 1  # original (jpn)
+
+
+def test_audio_by_original_language_rule():
+    # Japanese films in Japanese; everything else in English.
+    rules = _audio_rules("jpn:jpn;default:eng")
+    jp = [_audio(1, "jpn", 6), _audio(2, "eng", 6)]
+    fr = [_audio(3, "fra", 6), _audio(4, "eng", 6)]
+    assert select_audio(jp, "ja", rules, None) == 1
+    assert select_audio(fr, "fr", rules, None) == 4
+
+
+def test_audio_matched_but_absent_untouched():
+    rules = _audio_rules("jpn:jpn")  # no default
+    audios = [_audio(1, "eng", 6)]  # no Japanese track
+    assert select_audio(audios, "ja", rules, None) is None
 
 
 # --- subtitle selection ----------------------------------------------------
@@ -135,19 +179,43 @@ def test_prefers_non_forced_subtitle():
 
 # --- full part selection ---------------------------------------------------
 
-def test_select_for_part_japanese_movie():
-    rules = _subs("eng:fre;default:fre,eng")
+def test_select_for_part_japanese_movie_ov():
+    subs_rules = _subs("eng:fre;default:fre,eng")
     audios = [_audio(1, "jpn", 6), _audio(2, "eng", 6)]
     subs = [_sub(10, "fre"), _sub(11, "eng")]
-    sel = select_for_part(audios, subs, "ja", rules, max_channels=None)
-    assert sel.audio_stream_id == 1
-    assert sel.subtitle_stream_id == 10  # French via default
+    sel = select_for_part(audios, subs, "ja", _OV, subs_rules, max_channels=None)
+    assert sel.audio_stream_id == 1  # Japanese (original)
+    assert sel.subtitle_stream_id == 10  # French via default (jpn audio)
 
 
 def test_select_for_part_english_movie_off_rule():
-    rules = _subs("eng:off;default:fre,eng")
+    subs_rules = _subs("eng:off;default:fre,eng")
     audios = [_audio(1, "eng", 6)]
     subs = [_sub(11, "eng")]
-    sel = select_for_part(audios, subs, "en", rules, max_channels=None)
+    sel = select_for_part(audios, subs, "en", _OV, subs_rules, max_channels=None)
     assert sel.audio_stream_id == 1
     assert sel.disable_subtitles
+
+
+def test_select_for_part_subtitles_key_off_chosen_dub():
+    # Audio rule dubs a Japanese film to English; subtitle rule for 'eng' audio
+    # should then apply (NOT the rule for the original 'jpn').
+    audio_rules = _audio_rules("default:eng")
+    subs_rules = _subs("eng:fre;jpn:off")
+    audios = [_audio(1, "jpn", 6), _audio(2, "eng", 6)]
+    subs = [_sub(10, "fre")]
+    sel = select_for_part(audios, subs, "ja", audio_rules, subs_rules, max_channels=None)
+    assert sel.audio_stream_id == 2  # English dub chosen
+    assert sel.subtitle_stream_id == 10  # French subs (eng-audio rule)
+    assert not sel.disable_subtitles
+
+
+def test_select_for_part_audio_untouched_keys_on_current_default():
+    # No audio rules -> audio untouched. Subtitle keying uses the current
+    # default audio track's language, not the original language.
+    subs_rules = _subs("eng:fre;jpn:off")
+    audios = [_audio(1, "jpn", 6, default=True), _audio(2, "eng", 6)]
+    subs = [_sub(10, "fre")]
+    sel = select_for_part(audios, subs, "ja", RuleSet(), subs_rules, max_channels=None)
+    assert sel.audio_stream_id is None  # untouched
+    assert sel.disable_subtitles  # jpn default audio -> jpn:off rule

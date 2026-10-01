@@ -1,7 +1,8 @@
+# Example docker-compose for Babelarr. Copy, edit the secrets/paths, and run.
 services:
-  # Babelarr - make Plex speak your languages (audio/subs, posters, titles)
+  # Babelarr - make Plex speak your languages
   babelarr:
-    image: ghcr.io/ragepeanut/babelarr:latest   # or: build: .
+    image: ghcr.io/ragepeanut/babelarr:latest   # or: build: ..
     container_name: babelarr
     environment:
       - TZ=Europe/Paris
@@ -15,32 +16,29 @@ services:
       # and localized titles.
       - TMDB_API_KEY=xxxxxxxxxxxxxxxxxxxx
 
-      # --- The three concerns. Each is OPT-IN: unset => left untouched. ---
-      # Every rule set uses the SAME ordered, top-to-bottom, first-match grammar.
-      # Each may be an inline string (shown) OR a path to a mounted YAML file,
-      # e.g. SUBTITLE_RULES=/config/subtitle_rules.yml
+      # --- Rules: four independent, OPT-IN concerns. ---
+      # Supply them EITHER via the unified config file (see babelarr.example.yml,
+      # mounted below) OR via these per-concern env vars. If BOTH are present,
+      # an env var OVERRIDES that concern's section in the config file.
+      # Every rule set uses the same ordered, top-to-bottom, first-match grammar.
+      - CONFIG_FILE=/config/babelarr.yml
 
-      # Subtitles. Tokens: off (force OFF), original (original-language sub).
-      #   eng:fre      -> English audio -> French subs, else untouched
-      #   fre:off      -> French audio  -> subtitles OFF
-      #   default:...  -> anything else -> French, then English, else untouched
-      - SUBTITLE_RULES=eng:fre;fre:off;default:fre,eng
-
+      # Example of overriding just one concern from the file (uncomment to use):
+      # Audio. Token: original (original-language track). No 'off' token.
+      #   default:original  -> always prefer the original-language audio ("OV")
+      #   deu:deu;default:eng -> German films in German, everything else English
+      # - AUDIO_RULES=default:original
+      # Subtitles. Tokens: off (force OFF), original.
+      # - SUBTITLE_RULES=eng:fre;fre:off;default:fre,eng
       # Posters. Token: textless (TMDB "no language" poster; not guaranteed
-      # text-free since TMDB is community-maintained).
-      - POSTER_RULES=fre:fra;jpn:jpn,textless,eng;default:eng,textless
-
-      # Titles. Token: original (TMDB original title). Script classes allowed:
-      # cjk (= han/kana/hangul), latin, cyrillic, greek, arabic, hebrew, ...
-      # Specific keys MUST come before broader ones (see README).
-      #   jpn:original -> Japanese keeps its original title
-      #   cjk:eng      -> other CJK (Chinese/Korean) -> English title
-      #   default:original
-      - TITLE_RULES=jpn:original;cjk:eng;default:original
+      # text-free, since TMDB is community-maintained).
+      # - POSTER_RULES=fre:fra;default:eng,textless
+      # Titles. Token: original. Script classes allowed (cjk/han/kana/hangul,
+      # latin, cyrillic, ...). Specific keys MUST come before broader ones.
+      # - TITLE_RULES=jpn:original;cjk:eng;default:original
 
       # Only touch posters/titles you have NOT hand-picked (locked) in Plex.
       - ONLY_REPLACE_UNLOCKED=true
-
       # Optional audio-quality ceiling by channel count (6 = 5.1). Unset = no cap.
       - MAX_AUDIO_CHANNELS=6
       # Always-on full-library sweep cadence (minutes).
@@ -56,7 +54,7 @@ services:
     # http://<NAS-IP>:9999  (Settings -> Webhooks in Plex, requires Plex Pass).
     ports:
       - 9999:9999
-    # Optional: only needed if any *_RULES points at a mounted YAML file.
+    # Mount the dir holding your babelarr.yml (and any standalone rule files).
     volumes:
       - /volume1/docker/babelarr:/config
     restart: unless-stopped

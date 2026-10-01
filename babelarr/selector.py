@@ -5,6 +5,14 @@ test. Callers pass lightweight views of a title's streams plus the title's
 original language, and get back which audio/subtitle stream ids to set as
 default.
 
+Audio semantics (Babelarr grammar):
+  * Driven by ``AUDIO_RULES`` keyed on the title's original language.
+  * Preferences are languages; ``original`` resolves to the original language.
+  * Within the chosen language, the best track is picked (most channels not
+    exceeding ``MAX_AUDIO_CHANNELS``; codec rank breaks ties).
+  * No rule / no match / matched-but-absent -> leave audio untouched. (No
+    ``off`` token: audio is never "disabled".)
+
 Subtitle semantics (Babelarr grammar):
   * No rule matches (and no ``default``)      -> leave subtitles untouched.
   * Matched rule's preferences, first available wins.
@@ -67,29 +75,54 @@ def _codec_rank(codec: Optional[str]) -> int:
     return _CODEC_RANK.get(codec.strip().lower(), 0)
 
 
-def select_audio(
+def _best_track_in_language(
     audios: Sequence[AudioStreamView],
-    original_language: Optional[str],
+    language: Optional[str],
     max_channels: Optional[int],
 ) -> Optional[int]:
-    """Choose the audio stream id matching the original language.
+    """Best audio stream id in a given language, honoring the channel cap.
 
-    Among tracks whose language matches ``original_language``, pick the one with
-    the most channels that does not exceed ``max_channels`` (if set). Codec rank
-    breaks ties. Returns ``None`` if no track matches (leave audio untouched).
+    Picks the most channels not exceeding ``max_channels`` (codec rank breaks
+    ties). If the cap excludes every matching track, falls back to the
+    lowest-channel matching track. Returns ``None`` if no track matches.
     """
-    orig = normalize(original_language)
-    if orig is None:
+    lang = normalize(language)
+    if lang is None:
         return None
-
-    matching = [a for a in audios if normalize(a.language_code) == orig]
+    matching = [a for a in audios if normalize(a.language_code) == lang]
     if not matching:
         return None
-
     capped = [a for a in matching if max_channels is None or a.channels <= max_channels]
     pool = capped if capped else sorted(matching, key=lambda a: a.channels)[:1]
     best = max(pool, key=lambda a: (a.channels, _codec_rank(a.codec)))
     return best.id
+
+
+def select_audio(
+    audios: Sequence[AudioStreamView],
+    original_language: Optional[str],
+    rules: RuleSet,
+    max_channels: Optional[int],
+) -> Optional[int]:
+    """Choose the audio stream id according to ``AUDIO_RULES``.
+
+    The first rule matching the title's original language is authoritative; its
+    preferences are tried in order (``original`` resolves to the original
+    language), and for each the best available track in that language is chosen
+    (see ``_best_track_in_language``). Returns ``None`` to leave audio untouched
+    when no rule matches, or when a matched rule's preferences are all absent.
+    """
+    prefs = rules.match(original_language)
+    if prefs is None:
+        return None  # no AUDIO_RULES / no match -> leave audio untouched
+
+    for want in prefs:
+        want_lang = original_language if want == TOKEN_ORIGINAL else want
+        chosen = _best_track_in_language(audios, want_lang, max_channels)
+        if chosen is not None:
+            return chosen
+
+    return None  # matched rule, nothing available -> untouched
 
 
 def select_subtitle(
@@ -130,20 +163,32 @@ def select_for_part(
     audios: Sequence[AudioStreamView],
     subtitles: Sequence[SubtitleStreamView],
     original_language: Optional[str],
-    rules: RuleSet,
+    audio_rules: RuleSet,
+    subtitle_rules: RuleSet,
     max_channels: Optional[int],
 ) -> Selection:
-    """Full audio+subtitle selection for a single media part."""
-    audio_id = select_audio(audios, original_language, max_channels)
+    """Full audio+subtitle selection for a single media part.
 
-    audio_lang = original_language
+    Audio is chosen first (per ``AUDIO_RULES``). Subtitles are then keyed on the
+    audio language that will **actually play**: the track Babelarr selected if
+    it changed anything, otherwise the track Plex currently defaults to (falling
+    back to the original language only if no default is marked).
+    """
+    audio_id = select_audio(audios, original_language, audio_rules, max_channels)
+
     if audio_id is not None:
-        for a in audios:
-            if a.id == audio_id:
-                audio_lang = a.language_code
-                break
+        playing_lang = next(
+            (a.language_code for a in audios if a.id == audio_id), original_language
+        )
+    else:
+        # Audio left untouched: whatever Plex currently defaults to will play.
+        playing_lang = next(
+            (a.language_code for a in audios if a.is_default), None
+        )
+        if playing_lang is None:
+            playing_lang = original_language
 
-    sub_sel = select_subtitle(subtitles, audio_lang, original_language, rules)
+    sub_sel = select_subtitle(subtitles, playing_lang, original_language, subtitle_rules)
     return Selection(
         audio_stream_id=audio_id,
         subtitle_stream_id=sub_sel.subtitle_stream_id,

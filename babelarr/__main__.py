@@ -56,6 +56,7 @@ def main() -> int:
         config.only_replace_unlocked,
     )
     for name, rs in (
+        ("audio", config.audio_rules),
         ("subtitle", config.subtitle_rules),
         ("poster", config.poster_rules),
         ("title", config.title_rules),

@@ -216,24 +216,17 @@ def parse_inline(value: str, allowed_tokens: set) -> RuleSet:
     return parse_rules(entries, allowed_tokens)
 
 
-def parse_yaml(text: str, allowed_tokens: set) -> RuleSet:
-    """Parse the YAML list form, preserving order.
+def parse_rules_structure(raw, allowed_tokens: set) -> RuleSet:
+    """Build a RuleSet from an already-parsed YAML/JSON structure.
 
-    Expected shape (a LIST so order is explicit and unambiguous)::
+    ``raw`` is a LIST of single-key mappings (order explicit and unambiguous)::
 
-        rules:
-          - eng: [fre]
-          - cjk: [en]
-          - default: [original]
+        - eng: [fre]
+        - cjk: [en]
+        - default: [original]
 
-    A plain mapping is also accepted for convenience, relying on YAML/Python
-    dict insertion-order preservation.
+    A plain mapping is also accepted, relying on insertion-order preservation.
     """
-    import yaml  # lazy import
-
-    data = yaml.safe_load(text) or {}
-    raw = data.get("rules", data)
-
     entries: List[Tuple[str, str]] = []
     if isinstance(raw, list):
         for item in raw:
@@ -250,6 +243,15 @@ def parse_yaml(text: str, allowed_tokens: set) -> RuleSet:
         raise RuleError("rules must be a list or mapping")
 
     return parse_rules(entries, allowed_tokens)
+
+
+def parse_yaml(text: str, allowed_tokens: set) -> RuleSet:
+    """Parse a standalone per-concern YAML file (optionally wrapped in ``rules:``)."""
+    import yaml  # lazy import
+
+    data = yaml.safe_load(text) or {}
+    raw = data.get("rules", data) if isinstance(data, dict) else data
+    return parse_rules_structure(raw, allowed_tokens)
 
 
 def _prefs_to_str(v) -> str:

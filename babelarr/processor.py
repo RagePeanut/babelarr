@@ -106,7 +106,8 @@ class Processor:
                         audios=_audio_views(part),
                         subtitles=_subtitle_views(part),
                         original_language=original_language,
-                        rules=self.config.subtitle_rules,
+                        audio_rules=self.config.audio_rules,
+                        subtitle_rules=self.config.subtitle_rules,
                         max_channels=self.config.max_audio_channels,
                     )
                     apply_selection(part, selection, self.config.dry_run)

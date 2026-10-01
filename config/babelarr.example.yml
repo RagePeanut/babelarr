@@ -1,0 +1,44 @@
+# Unified Babelarr config file.
+# Mount this file and set CONFIG_FILE=/config/babelarr.yml (that path is also
+# the default, so CONFIG_FILE can be omitted if you mount it there).
+#
+# Four independent, OPT-IN concerns. Omit a concern entirely to leave it
+# untouched. Each concern is an ORDERED list of rules, evaluated TOP TO BOTTOM,
+# FIRST MATCH WINS -- declaration ORDER MATTERS (see the README). A more
+# specific key (a language, or a leaf script class like `kana`) MUST appear
+# BEFORE a broader one (`cjk`, `default`) or Babelarr refuses to start.
+#
+# Keys match a title's ORIGINAL language and may be: a language code (any ISO
+# 639 form), a script class (cjk / han / kana / hangul / latin / cyrillic /
+# greek / arabic / hebrew / devanagari / thai / ...), or `default` (must be
+# last). Values are ordered preference lists; the first AVAILABLE one wins.
+#
+# Reserved tokens per concern:
+#   audio      -> original            (the original-language track)
+#   subtitles  -> original | off      (off = force subtitles OFF)
+#   poster     -> textless            (TMDB "no language" poster; NOT guaranteed
+#                                       text-free -- community-categorized)
+#   title      -> original            (TMDB original title)
+#
+# NOTE on precedence: setting the matching *_RULES environment variable
+# (AUDIO_RULES / SUBTITLE_RULES / POSTER_RULES / TITLE_RULES) OVERRIDES that
+# concern's section here.
+
+audio:
+  - default: [original]          # always prefer original-language audio ("OV")
+
+subtitles:
+  - eng: [fre]                   # English audio -> French subs, else untouched
+  - fre: [off]                   # French audio  -> subtitles explicitly OFF
+  - default: [fre, eng]          # else -> French, then English, else untouched
+
+poster:
+  - fre: [fra]                   # French film -> French poster, else untouched
+  - jpn: [jpn, textless, eng]    # Japanese -> JP, else textless, else English
+  - default: [eng, textless]     # else -> English, else textless
+
+title:
+  - jpn: [original]              # Japanese film -> keep its original title
+  - cjk: [eng]                   # other CJK (Chinese/Korean) -> English title
+  - cyrillic: [eng]              # Cyrillic-script originals -> English title
+  - default: [original]          # else -> original title

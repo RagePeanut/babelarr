@@ -3,14 +3,17 @@
 **Make Plex speak your languages.**
 
 Plex isn't built for polyglots — Babelarr fixes that. For every movie and show,
-it looks up the title's **original language** from TMDB and, driven by three
+it looks up the title's **original language** from TMDB and, driven by four
 independent sets of per-language rules, can:
 
-1. Set the default **audio** track to the original language (best quality, with
-   an optional channel-count ceiling) and the **subtitle** track according to
-   your rules.
-2. Set the **poster** to a chosen language — or a textless one.
-3. Set the **display title** to a chosen language — or the original.
+1. Set the default **audio** track to a chosen language — your original-language
+   ("OV") purists and your native-dub watchers are both first-class.
+2. Set the **subtitle** track according to your rules (or force it off).
+3. Set the **poster** to a chosen language — or a textless one.
+4. Set the **display title** to a chosen language — or the original.
+
+Within the chosen audio language the best track is picked automatically (most
+channels, with an optional ceiling; codec quality breaks ties).
 
 Each concern is **opt-in**: leave its rule set unset and Babelarr won't touch
 it. It runs as a single Docker container that fits a typical \*arr stack. A full
@@ -30,7 +33,8 @@ added items (no Plex Pass).
 
 ## The rule model (read this first)
 
-All three concerns — subtitles, posters, titles — share **one** rule grammar.
+All four concerns — audio, subtitles, posters, titles — share **one** rule
+grammar.
 
 A rule set is an **ordered list** of `key: preferences` entries. At runtime
 Babelarr walks the list **top to bottom** and the **first matching key wins**.
@@ -63,11 +67,14 @@ last.
 
 ### Reserved preference tokens
 
-| Token | Subtitles | Posters | Titles |
-|-------|-----------|---------|--------|
-| `original` | the original-language subtitle track | — | TMDB **original title** |
-| `off` | force subtitles **OFF** (distinct from "untouched") | — | — |
-| `textless` | — | TMDB **"no language"** poster¹ | — |
+| Token | Audio | Subtitles | Posters | Titles |
+|-------|-------|-----------|---------|--------|
+| `original` | the original-language audio track | the original-language subtitle track | — | TMDB **original title** |
+| `off` | — | force subtitles **OFF** (distinct from "untouched") | — | — |
+| `textless` | — | — | TMDB **"no language"** poster¹ | — |
+
+(Audio has no `off` token — a video always plays *some* audio, so audio is never
+"disabled".)
 
 ¹ `textless` maps to TMDB's "no language / not specified" image category.
 Because TMDB is community-maintained, these posters are **not guaranteed** to be
@@ -115,43 +122,103 @@ jpn:original;cjk:eng;default:original
 kana:eng;han:fra;default:original
 ```
 
-### Inline vs. YAML
+Language codes may be written in any ISO 639 form — `fr`, `fre`, and `fra` are
+all understood and compared equivalently.
 
-Every `*_RULES` variable accepts either form (auto-detected):
+---
+
+## Where rules come from (config file vs. env vars)
+
+Rules for the four concerns can be supplied two ways, and you can mix them:
+
+### 1. A unified config file (recommended)
+
+One YAML file with top-level keys `audio`, `subtitles`, `poster`, `title`, each
+an ordered list of rules. Mount it and set `CONFIG_FILE=/config/babelarr.yml`
+(that path is also the **default**, so you can omit `CONFIG_FILE` if you mount
+there). This is the cleanest way to manage all four concerns together:
+
+```yaml
+audio:
+  - default: [original]
+subtitles:
+  - eng: [fre]
+  - default: [off]
+poster:
+  - default: [eng, textless]
+title:
+  - cjk: [eng]
+  - default: [original]
+```
+
+See [`config/babelarr.example.yml`](config/babelarr.example.yml). Omit a concern
+to leave it untouched.
+
+### 2. Per-concern environment variables
+
+`AUDIO_RULES`, `SUBTITLE_RULES`, `POSTER_RULES`, `TITLE_RULES`. Each accepts
+either form (auto-detected):
 
 * **Inline string** — entries separated by `;`, preferences by `,`:
   ```
   SUBTITLE_RULES=eng:fre;fre:off;default:fre,eng
   ```
-* **YAML file** — mount it and point the variable at the path. Use a **list** so
-  order is explicit:
+* **A path to a standalone YAML file** (per concern), using a `rules:` list:
   ```yaml
   rules:
     - eng: [fre]
     - fre: [off]
     - default: [fre, eng]
   ```
-  See the examples in [`config/`](config/).
 
-Language codes may be written in any ISO 639 form — `fr`, `fre`, and `fra` are
-all understood and compared equivalently.
+### ⚠️ Precedence: env vars OVERRIDE the config file
+
+> **If a `*_RULES` environment variable is set, it completely overrides that
+> concern's section in the config file.** The override is **per concern**: e.g.
+> setting `TITLE_RULES` replaces *only* the `title:` section; `audio`,
+> `subtitles` and `poster` still come from the file. A concern you set via env
+> var ignores its file section entirely (they are not merged — the env var
+> wins outright).
+
+### At least one rule set is required
+
+Babelarr does nothing without rules, so this is almost always a misconfiguration.
+**Startup fails** if no concern has rules from *either* source — set at least one
+`*_RULES` variable or provide a config file with at least one concern.
 
 ---
 
 ## How each concern decides
 
-### Audio
+### Audio — `AUDIO_RULES`
 
-Among the audio tracks whose language matches the title's TMDB
-`original_language`, Babelarr picks the one with the **most channels** that does
-not exceed `MAX_AUDIO_CHANNELS` (if set); codec quality breaks ties. If no track
-matches the original language, the current Plex audio default is left as-is.
-(Audio has no rule set of its own — it always targets the original language.)
+Keyed by the title's **original language**. Preferences are audio languages;
+`original` resolves to the title's original language. For the chosen language,
+Babelarr picks the track with the **most channels** that does not exceed
+`MAX_AUDIO_CHANNELS` (if set), with codec quality breaking ties. Misses (no
+matching rule, or no track in any preferred language) leave the current Plex
+audio default as-is.
+
+Common presets:
+
+```
+# "OV purist" — always original-language audio (the old Lingarr behavior):
+AUDIO_RULES=default:original
+
+# Native-dub watcher — German where available, else the original:
+AUDIO_RULES=default:deu,original
+
+# Mixed — keep anime in Japanese, everything else in English:
+AUDIO_RULES=jpn:jpn;default:eng
+```
 
 ### Subtitles — `SUBTITLE_RULES`
 
-Keyed by the **audio language that will actually play** (i.e. the track audio
-selected above, falling back to the original language). First available
+Keyed by the **audio language that will actually play** — i.e. the track
+`AUDIO_RULES` selected. If audio was left untouched, the language of Plex's
+*current* default audio track is used (falling back to the original language
+only when no default is marked). This means a native dub automatically gets the
+subtitle rule for the dub's language, not the original's. First available
 preference wins; `off` forces subtitles off; `original` resolves to the title's
 original language. Misses leave subtitles untouched.
 
@@ -177,7 +244,9 @@ even locked fields.
 
 ## Configuration
 
-All configuration is via environment variables.
+Operational settings are environment variables (below). The four **rule sets**
+come from a config file and/or `*_RULES` env vars — see
+[Where rules come from](#where-rules-come-from-config-file-vs-env-vars).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -185,9 +254,11 @@ All configuration is via environment variables.
 | `PLEX_TOKEN` | — (required) | Plex authentication token. |
 | `TMDB_API_KEY` | — (required) | TMDB API key (original language, posters, titles). |
 | `PLEX_LIBRARIES` | *(all movie + show libraries)* | Comma-separated library names to process. |
-| `SUBTITLE_RULES` | *(unset = untouched)* | Subtitle rule set. Tokens: `off`, `original`. |
-| `POSTER_RULES` | *(unset = untouched)* | Poster rule set. Token: `textless`. |
-| `TITLE_RULES` | *(unset = untouched)* | Title rule set. Token: `original`. |
+| `CONFIG_FILE` | `/config/babelarr.yml` | Path to the unified config file (optional if you use env vars). |
+| `AUDIO_RULES` | *(unset = untouched)* | Audio rule set. Token: `original`. **Overrides** the file's `audio:`. |
+| `SUBTITLE_RULES` | *(unset = untouched)* | Subtitle rule set. Tokens: `off`, `original`. **Overrides** the file's `subtitles:`. |
+| `POSTER_RULES` | *(unset = untouched)* | Poster rule set. Token: `textless`. **Overrides** the file's `poster:`. |
+| `TITLE_RULES` | *(unset = untouched)* | Title rule set. Token: `original`. **Overrides** the file's `title:`. |
 | `ONLY_REPLACE_UNLOCKED` | `true` | Skip posters/titles whose Plex field is locked (hand-picked). |
 | `MAX_AUDIO_CHANNELS` | *(unset = no cap)* | Ceiling on audio channels (e.g. `6` = 5.1). |
 | `SWEEP_INTERVAL_MINUTES` | `360` | Cadence of the always-on full-library sweep. |
@@ -219,7 +290,8 @@ On top of that:
 
 ### docker-compose
 
-See [`docker-compose.yml`](docker-compose.yml). Minimal example:
+See [`examples/docker-compose.example.yml`](examples/docker-compose.example.yml).
+Minimal example (rules via env vars; alternatively mount a config file):
 
 ```yaml
 services:
@@ -230,6 +302,7 @@ services:
       - PLEX_URL=http://192.168.1.10:32400
       - PLEX_TOKEN=xxxxxxxxxxxx
       - TMDB_API_KEY=xxxxxxxxxxxx
+      - AUDIO_RULES=default:original
       - SUBTITLE_RULES=eng:fre;fre:off;default:fre,eng
       - POSTER_RULES=fre:fra;default:eng,textless
       - TITLE_RULES=jpn:original;cjk:eng;default:original
@@ -265,12 +338,18 @@ in `tests/`.
 ## Migration from Lingarr
 
 * The package/image is now **`babelarr`** (was `lingarr`).
+* **Breaking: audio is now rule-driven.** Lingarr always set audio to the
+  original language. Babelarr requires explicit **`AUDIO_RULES`**; to keep the
+  old behavior set `AUDIO_RULES=default:original`. Unset = audio untouched.
 * **Breaking: subtitle "OFF".** Previously an *empty* preference list meant
   "subtitles off". Now use the explicit **`off`** token (`fre:off`). An empty
   list / a matched-but-unavailable rule now means **leave untouched** (let Plex
   decide) — a deliberately different outcome from `off`.
-* **New:** `POSTER_RULES`, `TITLE_RULES`, `ONLY_REPLACE_UNLOCKED`, script-class
-  keys, and the `original` / `textless` tokens.
+* **Breaking: at least one rule set is now required** — Babelarr refuses to
+  start with no rules configured.
+* **New:** `AUDIO_RULES`, `POSTER_RULES`, `TITLE_RULES`, the unified
+  **`CONFIG_FILE`**, `ONLY_REPLACE_UNLOCKED`, script-class keys, and the
+  `original` / `textless` tokens.
 * Rule sets are now **ordered and validated**; see
   [the rule model](#the-rule-model-read-this-first).
 

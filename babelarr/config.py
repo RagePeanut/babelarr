@@ -1,17 +1,26 @@
-"""Configuration loading from environment variables.
+"""Configuration loading.
 
-All config is supplied as flat environment variables to match the rest of the
-user's *arr stack. Babelarr drives three independent, opt-in concerns off each
-title's TMDB original language:
+Babelarr drives four independent, opt-in concerns off each title's TMDB
+original language:
 
-  * ``SUBTITLE_RULES`` — which subtitle track to enable (or force OFF).
-  * ``POSTER_RULES``   — which language's poster (or a textless one) to set.
-  * ``TITLE_RULES``    — which language's title (or the original) to set.
+  * ``audio``     — which audio track (language) to default to.
+  * ``subtitles`` — which subtitle track to enable (or force OFF).
+  * ``poster``    — which language's poster (or a textless one) to set.
+  * ``title``     — which language's title (or the original) to set.
 
-Each of these accepts either a compact inline string or a path to a YAML file
-(auto-detected). All share the same ordered, top-to-bottom, first-match rule
-grammar (see ``rules.py``). Any rule set left unset means "leave that concern
-completely untouched".
+Rules can be supplied two ways:
+
+  1. A unified **config file** (YAML) with top-level keys ``audio``,
+     ``subtitles``, ``poster`` and ``title``, pointed at by ``CONFIG_FILE``
+     (default ``/config/babelarr.yml`` if present).
+  2. Per-concern **environment variables** ``AUDIO_RULES``, ``SUBTITLE_RULES``,
+     ``POSTER_RULES``, ``TITLE_RULES`` — each an inline string or a path to a
+     standalone YAML file.
+
+**Precedence:** an environment variable, when set, **overrides** that concern's
+section in the config file. Each concern is independent; a concern with no rules
+from either source is simply left untouched. At least one concern must be
+configured (from either source), or startup fails.
 """
 
 from __future__ import annotations
@@ -28,6 +37,7 @@ from .rules import (
     TOKEN_ORIGINAL,
     TOKEN_TEXTLESS,
     parse_inline,
+    parse_rules_structure,
     parse_yaml,
 )
 
@@ -37,25 +47,79 @@ class ConfigError(Exception):
 
 
 # Which reserved preference tokens each concern permits.
+AUDIO_TOKENS = {TOKEN_ORIGINAL}
 SUBTITLE_TOKENS = {TOKEN_ORIGINAL, TOKEN_OFF}
 POSTER_TOKENS = {TOKEN_TEXTLESS}
 TITLE_TOKENS = {TOKEN_ORIGINAL}
 
+DEFAULT_CONFIG_PATH = "/config/babelarr.yml"
 
-def _load_rules(value: Optional[str], allowed_tokens: set) -> RuleSet:
-    """Load a RuleSet from an env value: a YAML file path or an inline string."""
-    if not value or not value.strip():
-        return RuleSet()  # empty -> leave this concern untouched
+# concern name -> (env var, config-file key, allowed tokens)
+_CONCERNS = {
+    "audio": ("AUDIO_RULES", "audio", AUDIO_TOKENS),
+    "subtitles": ("SUBTITLE_RULES", "subtitles", SUBTITLE_TOKENS),
+    "poster": ("POSTER_RULES", "poster", POSTER_TOKENS),
+    "title": ("TITLE_RULES", "title", TITLE_TOKENS),
+}
+
+
+def _rules_from_env_value(value: str, allowed_tokens: set, concern: str) -> RuleSet:
+    """A single ``*_RULES`` env value: a YAML file path or an inline string."""
     value = value.strip()
     maybe_path = Path(value)
     try:
         if maybe_path.exists() and maybe_path.is_file():
-            return parse_yaml(
-                maybe_path.read_text(encoding="utf-8"), allowed_tokens
-            )
+            return parse_yaml(maybe_path.read_text(encoding="utf-8"), allowed_tokens)
         return parse_inline(value, allowed_tokens)
     except RuleError as exc:
-        raise ConfigError(str(exc)) from exc
+        raise ConfigError(f"{concern} rules: {exc}") from exc
+
+
+def _load_config_file() -> dict:
+    """Load the unified config file if present. Returns its concern sections."""
+    path = os.environ.get("CONFIG_FILE", "").strip() or DEFAULT_CONFIG_PATH
+    p = Path(path)
+    if not p.exists() or not p.is_file():
+        # An explicitly-set CONFIG_FILE that is missing is an error; the default
+        # path simply being absent is fine (env vars may provide everything).
+        if os.environ.get("CONFIG_FILE", "").strip():
+            raise ConfigError(f"CONFIG_FILE not found: {path}")
+        return {}
+    import yaml  # lazy
+
+    try:
+        data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:  # pragma: no cover - passthrough
+        raise ConfigError(f"Could not parse config file {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ConfigError("Config file must be a mapping of concern -> rules")
+    unknown = set(data) - set(_CONCERNS)
+    if unknown:
+        raise ConfigError(
+            f"Unknown keys in config file: {', '.join(sorted(unknown))}. "
+            f"Valid keys: {', '.join(_CONCERNS)}"
+        )
+    return data
+
+
+def _resolve_rules(file_sections: dict) -> dict:
+    """Resolve each concern's RuleSet, env var overriding the config file."""
+    resolved: dict = {}
+    for concern, (env_var, file_key, tokens) in _CONCERNS.items():
+        env_val = os.environ.get(env_var)
+        if env_val is not None and env_val.strip():
+            # Env var present -> overrides the config file for this concern.
+            resolved[concern] = _rules_from_env_value(env_val, tokens, concern)
+        elif file_key in file_sections:
+            try:
+                resolved[concern] = parse_rules_structure(
+                    file_sections[file_key], tokens
+                )
+            except RuleError as exc:
+                raise ConfigError(f"{concern} rules (config file): {exc}") from exc
+        else:
+            resolved[concern] = RuleSet()  # untouched
+    return resolved
 
 
 def _env_int(name: str, default: Optional[int]) -> Optional[int]:
@@ -81,6 +145,7 @@ class Config:
     plex_token: str
     tmdb_api_key: str
     libraries: Optional[List[str]]  # None -> all movie+show libraries
+    audio_rules: RuleSet
     subtitle_rules: RuleSet
     poster_rules: RuleSet
     title_rules: RuleSet
@@ -125,23 +190,31 @@ class Config:
         if max_channels is not None and max_channels < 1:
             raise ConfigError("MAX_AUDIO_CHANNELS must be >= 1 when set")
 
+        file_sections = _load_config_file()
+        rules = _resolve_rules(file_sections)
+
+        if all(rs.is_empty() for rs in rules.values()):
+            raise ConfigError(
+                "No rules configured. Set at least one of AUDIO_RULES, "
+                "SUBTITLE_RULES, POSTER_RULES, TITLE_RULES, or provide a "
+                "config file (CONFIG_FILE / /config/babelarr.yml) with at "
+                "least one of: audio, subtitles, poster, title."
+            )
+
         return cls(
             plex_url=plex_url,
             plex_token=plex_token,
             tmdb_api_key=tmdb_api_key,
             libraries=libraries,
-            subtitle_rules=_load_rules(
-                os.environ.get("SUBTITLE_RULES"), SUBTITLE_TOKENS
-            ),
-            poster_rules=_load_rules(os.environ.get("POSTER_RULES"), POSTER_TOKENS),
-            title_rules=_load_rules(os.environ.get("TITLE_RULES"), TITLE_TOKENS),
+            audio_rules=rules["audio"],
+            subtitle_rules=rules["subtitles"],
+            poster_rules=rules["poster"],
+            title_rules=rules["title"],
             max_audio_channels=max_channels,
             only_replace_unlocked=_env_bool("ONLY_REPLACE_UNLOCKED", True),
             sweep_interval_minutes=_env_int("SWEEP_INTERVAL_MINUTES", 360),
             new_media_mode=mode,
             webhook_port=_env_int("WEBHOOK_PORT", 9999),
-            recent_poll_interval_minutes=_env_int(
-                "RECENT_POLL_INTERVAL_MINUTES", 15
-            ),
+            recent_poll_interval_minutes=_env_int("RECENT_POLL_INTERVAL_MINUTES", 15),
             dry_run=_env_bool("DRY_RUN", False),
         )
