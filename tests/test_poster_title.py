@@ -44,6 +44,19 @@ def test_poster_textless_token():
     assert select_poster(posters, "ja", rules) == "none.jpg"
 
 
+def test_poster_original_token():
+    # 'original' resolves to the title's original language.
+    rules = _posters("default:original,en")
+    posters = [_p("ja.jpg", "ja"), _p("en.jpg", "en")]
+    assert select_poster(posters, "ja", rules) == "ja.jpg"  # original = Japanese
+
+
+def test_poster_original_falls_through_when_absent():
+    rules = _posters("default:original,en")
+    posters = [_p("en.jpg", "en")]  # no original-language (ja) poster
+    assert select_poster(posters, "ja", rules) == "en.jpg"
+
+
 def test_poster_highest_vote_wins_within_language():
     rules = _posters("default:eng")
     posters = [_p("en-low.jpg", "en", vote=1.0), _p("en-high.jpg", "en", vote=9.0)]

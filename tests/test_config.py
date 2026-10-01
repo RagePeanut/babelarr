@@ -21,7 +21,7 @@ def base_env(monkeypatch, tmp_path):
     monkeypatch.setenv("PLEX_URL", "http://x:32400")
     monkeypatch.setenv("PLEX_TOKEN", "tok")
     monkeypatch.setenv("TMDB_API_KEY", "key")
-    for v in ("AUDIO_RULES", "SUBTITLE_RULES", "POSTER_RULES", "TITLE_RULES",
+    for v in ("AUDIO_RULES", "SUBTITLES_RULES", "POSTER_RULES", "TITLE_RULES",
               "CONFIG_FILE", "STATE_PERSISTENCE", "STATE_FILE",
               "SKIP_USER_LOCKED"):
         monkeypatch.delenv(v, raising=False)

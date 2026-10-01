@@ -29,7 +29,7 @@ services:
       #   deu:deu;default:eng -> German films in German, everything else English
       # - AUDIO_RULES=default:original
       # Subtitles. Tokens: off (force OFF), original.
-      # - SUBTITLE_RULES=eng:fre;fre:off;default:fre,eng
+      # - SUBTITLES_RULES=eng:fre;fre:off;default:fre,eng
       # Posters. Token: textless (TMDB "no language" poster; not guaranteed
       # text-free, since TMDB is community-maintained).
       # - POSTER_RULES=fre:fra;default:eng,textless

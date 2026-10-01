@@ -1,5 +1,5 @@
-# Optional readable form of SUBTITLE_RULES.
-# Mount this file and set: SUBTITLE_RULES=/config/subtitle_rules.yml
+# Optional readable form of SUBTITLES_RULES.
+# Mount this file and set: SUBTITLES_RULES=/config/subtitles_rules.yml
 #
 # Rules are an ORDERED list. At runtime Babelarr walks them TOP TO BOTTOM and
 # the FIRST matching key wins -- that rule is authoritative (it never falls
@@ -9,7 +9,8 @@
 # The value is an ordered list of subtitle preferences; the first one that is
 # actually present on the file wins. Reserved tokens for subtitles:
 #   off       -> force subtitles OFF
-#   original  -> the title's original-language subtitle
+# (Subtitles have no `original` token: rules key on the played audio, so
+#  concrete language keys plus `default` already cover every case.)
 #
 # If a matched rule's preferences are ALL missing, subtitles are left UNTOUCHED
 # (Plex decides) -- this is different from `off`, which explicitly disables them.

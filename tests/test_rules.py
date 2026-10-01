@@ -93,9 +93,24 @@ def test_textless_token_rejected_for_subtitles():
         parse_inline("eng:textless", SUBTITLE_TOKENS)
 
 
-def test_original_token_rejected_for_posters():
+def test_original_token_rejected_for_subtitles():
     with pytest.raises(RuleError):
-        parse_inline("eng:original", POSTER_TOKENS)
+        parse_inline("eng:original", SUBTITLE_TOKENS)
+
+
+def test_original_token_ok_for_posters():
+    rs = parse_inline("default:original,textless", POSTER_TOKENS)
+    assert rs.match("ja") == ["original", "textless"]
+
+
+def test_textless_token_rejected_for_titles():
+    with pytest.raises(RuleError):
+        parse_inline("eng:textless", TITLE_TOKENS)
+
+
+def test_off_token_rejected_for_titles():
+    with pytest.raises(RuleError):
+        parse_inline("eng:off", TITLE_TOKENS)
 
 
 # --- order / consistency validation ----------------------------------------

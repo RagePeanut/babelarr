@@ -5,7 +5,8 @@
 # subtitle example for the full semantics). Each key is a title's ORIGINAL
 # language (or a script class, or `default`). The value is an ordered list of
 # poster-language preferences; the first language with a poster available on
-# TMDB wins. Reserved token for posters:
+# TMDB wins. Reserved tokens for posters:
+#   original  -> a poster in the title's ORIGINAL language.
 #   textless  -> a poster from TMDB's "no language / not specified" category.
 #
 # NOTE: `textless` maps to TMDB's "no language" category. Because TMDB is
@@ -16,6 +17,6 @@
 # If a matched rule's preferences are all unavailable, the poster is left
 # UNTOUCHED (never falls through to `default`).
 rules:
-  - fre: [fra]                 # French film -> French poster, else untouched
-  - jpn: [jpn, textless, eng]  # Japanese -> JP poster, else textless, else English
-  - default: [eng, textless]   # anything else -> English, else textless
+  - fre: [fra]                      # French film -> French poster, else untouched
+  - jpn: [jpn, textless, eng]       # Japanese -> JP poster, else textless, else English
+  - default: [original, textless, eng]  # else -> original-language, else textless, else English

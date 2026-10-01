@@ -15,13 +15,14 @@
 #
 # Reserved tokens per concern:
 #   audio      -> original            (the original-language track)
-#   subtitles  -> original | off      (off = force subtitles OFF)
-#   poster     -> textless            (TMDB "no language" poster; NOT guaranteed
-#                                       text-free -- community-categorized)
+#   subtitles  -> off                 (force subtitles OFF)
+#   poster     -> original | textless (original-language poster; or TMDB "no
+#                                       language" poster -- NOT guaranteed
+#                                       text-free, community-categorized)
 #   title      -> original            (TMDB original title)
 #
 # NOTE on precedence: setting the matching *_RULES environment variable
-# (AUDIO_RULES / SUBTITLE_RULES / POSTER_RULES / TITLE_RULES) OVERRIDES that
+# (AUDIO_RULES / SUBTITLES_RULES / POSTER_RULES / TITLE_RULES) OVERRIDES that
 # concern's section here.
 
 audio:

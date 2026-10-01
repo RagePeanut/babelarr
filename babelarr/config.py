@@ -13,7 +13,7 @@ Rules can be supplied two ways:
   1. A unified **config file** (YAML) with top-level keys ``audio``,
      ``subtitles``, ``poster`` and ``title``, pointed at by ``CONFIG_FILE``
      (default ``/config/babelarr.yml`` if present).
-  2. Per-concern **environment variables** ``AUDIO_RULES``, ``SUBTITLE_RULES``,
+  2. Per-concern **environment variables** ``AUDIO_RULES``, ``SUBTITLES_RULES``,
      ``POSTER_RULES``, ``TITLE_RULES`` — each an inline string or a path to a
      standalone YAML file.
 
@@ -53,8 +53,8 @@ class ConfigError(Exception):
 
 # Which reserved preference tokens each concern permits.
 AUDIO_TOKENS = {TOKEN_ORIGINAL}
-SUBTITLE_TOKENS = {TOKEN_ORIGINAL, TOKEN_OFF}
-POSTER_TOKENS = {TOKEN_TEXTLESS}
+SUBTITLE_TOKENS = {TOKEN_OFF}
+POSTER_TOKENS = {TOKEN_ORIGINAL, TOKEN_TEXTLESS}
 TITLE_TOKENS = {TOKEN_ORIGINAL}
 
 DEFAULT_CONFIG_PATH = "/config/babelarr.yml"
@@ -66,7 +66,7 @@ LOCKABLE_FIELDS = ("poster", "title")
 # concern name -> (env var, config-file key, allowed tokens)
 _CONCERNS = {
     "audio": ("AUDIO_RULES", "audio", AUDIO_TOKENS),
-    "subtitles": ("SUBTITLE_RULES", "subtitles", SUBTITLE_TOKENS),
+    "subtitles": ("SUBTITLES_RULES", "subtitles", SUBTITLE_TOKENS),
     "poster": ("POSTER_RULES", "poster", POSTER_TOKENS),
     "title": ("TITLE_RULES", "title", TITLE_TOKENS),
 }
@@ -255,7 +255,7 @@ class Config:
         if all(rs.is_empty() for rs in rules.values()):
             raise ConfigError(
                 "No rules configured. Set at least one of AUDIO_RULES, "
-                "SUBTITLE_RULES, POSTER_RULES, TITLE_RULES, or provide a "
+                "SUBTITLES_RULES, POSTER_RULES, TITLE_RULES, or provide a "
                 "config file (CONFIG_FILE / /config/babelarr.yml) with at "
                 "least one of: audio, subtitles, poster, title."
             )
