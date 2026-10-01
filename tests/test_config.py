@@ -79,7 +79,8 @@ title:
     base_env.setenv("CONFIG_FILE", str(cfg_file))
     cfg = Config.from_env()
     assert cfg.audio_rules.match("fr") == ["original"]
-    assert cfg.subtitle_rules.match("eng") == ["fre"]
+    # 'fre' normalizes to canonical ISO 639-3 'fra'.
+    assert cfg.subtitle_rules.match("eng") == ["fra"]
     assert cfg.poster_rules.match("de") == ["eng", "textless"]
     assert cfg.title_rules.match("ja") == ["eng"]
 
