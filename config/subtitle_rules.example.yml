@@ -1,0 +1,15 @@
+# Optional readable form of SUBTITLE_RULES.
+# Mount this file and set: SUBTITLE_RULES=/config/subtitle_rules.yml
+#
+# Each key is an AUDIO language; the value is an ordered list of SUBTITLE
+# language preferences (first available wins). An empty list disables subs for
+# that audio language. "default" applies to any audio language not listed.
+#
+# Important: once a specific rule matches, if none of its preferences are
+# present the subtitles are turned OFF -- it never falls through to "default".
+#
+# Language codes may be given in any ISO 639 form (fr / fre / fra all work).
+rules:
+  eng: [fre]           # English audio -> French subs, else OFF
+  fre: []              # French audio  -> no subtitles
+  default: [fre, eng]  # anything else -> French, then English, else OFF

@@ -1,0 +1,4 @@
+PlexAPI>=4.15.0
+requests>=2.31.0
+pycountry>=24.6.1
+PyYAML>=6.0
