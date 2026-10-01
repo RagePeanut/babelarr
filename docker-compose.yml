@@ -1,8 +1,8 @@
 services:
-  # Lingarr - automatic Plex audio/subtitle track selection
-  lingarr:
-    image: ghcr.io/ragepeanut/lingarr:latest   # or: build: .
-    container_name: lingarr
+  # Babelarr - make Plex speak your languages (audio/subs, posters, titles)
+  babelarr:
+    image: ghcr.io/ragepeanut/babelarr:latest   # or: build: .
+    container_name: babelarr
     environment:
       - TZ=Europe/Paris
       # Plex (Plex runs on the NAS host itself -> use the NAS LAN IP, not localhost)
@@ -11,23 +11,41 @@ services:
       # Leave PLEX_LIBRARIES unset to process ALL movie + show libraries,
       # or restrict with a comma-separated list of library names:
       # - PLEX_LIBRARIES=Movies,TV Shows
-      # TMDB - authoritative source of each title's original language
+      # TMDB - authoritative source of each title's original language, posters,
+      # and localized titles.
       - TMDB_API_KEY=xxxxxxxxxxxxxxxxxxxx
-      # Subtitle rules. Either an inline string (shown here) OR a path to a
-      # mounted YAML file, e.g. SUBTITLE_RULES=/config/subtitle_rules.yml
-      #   eng:fre        -> English audio  -> French subs, else OFF (no fallback)
-      #   fre:           -> French audio   -> subtitles OFF
-      #   default:fre,eng-> anything else  -> French, then English, else OFF
-      - SUBTITLE_RULES=eng:fre;fre:;default:fre,eng
-      # Optional audio-quality ceiling by channel count (6 = 5.1). Picks the
-      # best matching-language track with channels <= this. Unset = no cap.
+
+      # --- The three concerns. Each is OPT-IN: unset => left untouched. ---
+      # Every rule set uses the SAME ordered, top-to-bottom, first-match grammar.
+      # Each may be an inline string (shown) OR a path to a mounted YAML file,
+      # e.g. SUBTITLE_RULES=/config/subtitle_rules.yml
+
+      # Subtitles. Tokens: off (force OFF), original (original-language sub).
+      #   eng:fre      -> English audio -> French subs, else untouched
+      #   fre:off      -> French audio  -> subtitles OFF
+      #   default:...  -> anything else -> French, then English, else untouched
+      - SUBTITLE_RULES=eng:fre;fre:off;default:fre,eng
+
+      # Posters. Token: textless (TMDB "no language" poster; not guaranteed
+      # text-free since TMDB is community-maintained).
+      - POSTER_RULES=fre:fra;jpn:jpn,textless,eng;default:eng,textless
+
+      # Titles. Token: original (TMDB original title). Script classes allowed:
+      # cjk (= han/kana/hangul), latin, cyrillic, greek, arabic, hebrew, ...
+      # Specific keys MUST come before broader ones (see README).
+      #   jpn:original -> Japanese keeps its original title
+      #   cjk:eng      -> other CJK (Chinese/Korean) -> English title
+      #   default:original
+      - TITLE_RULES=jpn:original;cjk:eng;default:original
+
+      # Only touch posters/titles you have NOT hand-picked (locked) in Plex.
+      - ONLY_REPLACE_UNLOCKED=true
+
+      # Optional audio-quality ceiling by channel count (6 = 5.1). Unset = no cap.
       - MAX_AUDIO_CHANNELS=6
       # Always-on full-library sweep cadence (minutes).
       - SWEEP_INTERVAL_MINUTES=360
       # How new media is caught between sweeps: webhook | polling | disabled
-      #   webhook  -> requires Plex Pass; instant on library.new (needs the port below)
-      #   polling  -> no Plex Pass; scans recently-added on an interval
-      #   disabled -> rely solely on the full sweep (default)
       - NEW_MEDIA_MODE=webhook
       - WEBHOOK_PORT=9999
       - RECENT_POLL_INTERVAL_MINUTES=15
@@ -38,7 +56,7 @@ services:
     # http://<NAS-IP>:9999  (Settings -> Webhooks in Plex, requires Plex Pass).
     ports:
       - 9999:9999
-    # Optional: only needed if SUBTITLE_RULES points at a mounted YAML file.
+    # Optional: only needed if any *_RULES points at a mounted YAML file.
     volumes:
-      - /volume1/docker/lingarr:/config
+      - /volume1/docker/babelarr:/config
     restart: unless-stopped

@@ -8,9 +8,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY lingarr ./lingarr
+COPY babelarr ./babelarr
 
-# Default config dir for an optional mounted subtitle_rules.yml.
+# Default config dir for optional mounted *_rules.yml files.
 VOLUME ["/config"]
 
-ENTRYPOINT ["python", "-m", "lingarr"]
+ENTRYPOINT ["python", "-m", "babelarr"]

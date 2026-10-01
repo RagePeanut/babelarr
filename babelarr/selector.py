@@ -1,9 +1,17 @@
-"""Pure track-selection logic.
+"""Pure audio/subtitle track-selection logic.
 
 Kept free of Plex/network dependencies so it is easy to reason about and unit
-test. Callers pass in lightweight views of a title's streams plus the title's
+test. Callers pass lightweight views of a title's streams plus the title's
 original language, and get back which audio/subtitle stream ids to set as
-default (or ``None`` meaning "do not change this dimension").
+default.
+
+Subtitle semantics (Babelarr grammar):
+  * No rule matches (and no ``default``)      -> leave subtitles untouched.
+  * Matched rule's preferences, first available wins.
+  * ``off`` token in a matched rule           -> force subtitles OFF.
+  * ``original`` token                         -> original-language subtitle.
+  * Matched rule but none of its preferences present -> leave untouched
+    (let Plex handle it); does NOT fall through to ``default``.
 """
 
 from __future__ import annotations
@@ -11,8 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
-from .config import SubtitleRules
 from .langcodes import normalize
+from .rules import RuleSet, TOKEN_OFF, TOKEN_ORIGINAL
 
 
 @dataclass(frozen=True)
@@ -36,11 +44,9 @@ class SubtitleStreamView:
 class Selection:
     """Result of selecting tracks for one media part.
 
-    ``audio_stream_id`` / ``subtitle_stream_id`` are the ids to make default.
-    ``None`` for audio means "leave current audio default".
-    ``subtitle_stream_id is None`` combined with ``disable_subtitles`` tells the
-    caller to turn subtitles off; ``None`` without the disable flag means
-    "leave subtitles untouched".
+    ``audio_stream_id`` / ``subtitle_stream_id`` are ids to make default;
+    ``None`` means "leave that dimension's current default alone".
+    ``disable_subtitles`` set means explicitly turn subtitles OFF.
     """
 
     audio_stream_id: Optional[int]
@@ -48,22 +54,10 @@ class Selection:
     disable_subtitles: bool
 
 
-# Rough codec quality ranking used only as a tie-breaker when channel counts
-# are equal. Higher is better.
 _CODEC_RANK = {
-    "truehd": 60,
-    "dtshd": 55,
-    "dts-hd": 55,
-    "flac": 50,
-    "pcm": 50,
-    "lpcm": 50,
-    "dts": 40,
-    "eac3": 30,
-    "ac3": 20,
-    "aac": 15,
-    "mp3": 10,
-    "opus": 12,
-    "vorbis": 8,
+    "truehd": 60, "dtshd": 55, "dts-hd": 55, "flac": 50, "pcm": 50,
+    "lpcm": 50, "dts": 40, "eac3": 30, "ac3": 20, "aac": 15, "mp3": 10,
+    "opus": 12, "vorbis": 8,
 }
 
 
@@ -82,8 +76,7 @@ def select_audio(
 
     Among tracks whose language matches ``original_language``, pick the one with
     the most channels that does not exceed ``max_channels`` (if set). Codec rank
-    then bitrate-agnostic stability break ties. Returns ``None`` if no track
-    matches the original language (caller leaves audio untouched).
+    breaks ties. Returns ``None`` if no track matches (leave audio untouched).
     """
     orig = normalize(original_language)
     if orig is None:
@@ -93,15 +86,8 @@ def select_audio(
     if not matching:
         return None
 
-    capped = [
-        a
-        for a in matching
-        if max_channels is None or a.channels <= max_channels
-    ]
-    # If the cap excludes everything (every matching track is above the ceiling),
-    # fall back to the lowest-channel matching track rather than giving up.
+    capped = [a for a in matching if max_channels is None or a.channels <= max_channels]
     pool = capped if capped else sorted(matching, key=lambda a: a.channels)[:1]
-
     best = max(pool, key=lambda a: (a.channels, _codec_rank(a.codec)))
     return best.id
 
@@ -109,54 +95,47 @@ def select_audio(
 def select_subtitle(
     subtitles: Sequence[SubtitleStreamView],
     audio_language: Optional[str],
-    rules: SubtitleRules,
+    original_language: Optional[str],
+    rules: RuleSet,
 ) -> Selection:
     """Decide the subtitle stream given the chosen audio language and rules.
 
-    Semantics:
-    * No rule and no default -> leave subtitles untouched.
-    * A matched rule's preferences are tried in order; first available wins.
-    * If a rule exists but none of its preferences are present (including the
-      empty-list "disable" case) -> subtitles OFF. Never falls through to
-      default once an explicit rule matched.
+    The rule is matched on the audio language that will actually play. Each
+    preference is resolved against available subtitle streams; ``off`` forces
+    subtitles off; ``original`` resolves to the title's original language.
     """
-    prefs = rules.lookup(audio_language)
+    prefs = rules.match(audio_language)
     if prefs is None:
-        # Nothing configured -> don't touch subtitles.
-        return Selection(audio_stream_id=None, subtitle_stream_id=None,
-                         disable_subtitles=False)
+        return Selection(None, None, disable_subtitles=False)  # untouched
 
-    # Prefer non-forced full subtitles; fall back to forced if that's all there is.
     for want in prefs:
-        want_norm = normalize(want)
-        candidates = [
-            s for s in subtitles if normalize(s.language_code) == want_norm
-        ]
+        if want == TOKEN_OFF:
+            return Selection(None, None, disable_subtitles=True)
+        want_lang = original_language if want == TOKEN_ORIGINAL else want
+        want_norm = normalize(want_lang)
+        if want_norm is None:
+            continue
+        candidates = [s for s in subtitles if normalize(s.language_code) == want_norm]
         if not candidates:
             continue
         non_forced = [s for s in candidates if not s.forced]
         chosen = non_forced[0] if non_forced else candidates[0]
-        return Selection(audio_stream_id=None, subtitle_stream_id=chosen.id,
-                         disable_subtitles=False)
+        return Selection(None, chosen.id, disable_subtitles=False)
 
-    # Rule matched but no preferred subtitle exists -> turn subtitles off.
-    return Selection(audio_stream_id=None, subtitle_stream_id=None,
-                     disable_subtitles=True)
+    # Matched rule but nothing available -> leave untouched (Plex handles it).
+    return Selection(None, None, disable_subtitles=False)
 
 
 def select_for_part(
     audios: Sequence[AudioStreamView],
     subtitles: Sequence[SubtitleStreamView],
     original_language: Optional[str],
-    rules: SubtitleRules,
+    rules: RuleSet,
     max_channels: Optional[int],
 ) -> Selection:
-    """Full selection for a single media part."""
+    """Full audio+subtitle selection for a single media part."""
     audio_id = select_audio(audios, original_language, max_channels)
 
-    # The audio language that will actually play drives the subtitle rule. If we
-    # picked a track, use its language; otherwise use the original language as a
-    # best effort (what Plex is most likely already defaulting to).
     audio_lang = original_language
     if audio_id is not None:
         for a in audios:
@@ -164,7 +143,7 @@ def select_for_part(
                 audio_lang = a.language_code
                 break
 
-    sub_sel = select_subtitle(subtitles, audio_lang, rules)
+    sub_sel = select_subtitle(subtitles, audio_lang, original_language, rules)
     return Selection(
         audio_stream_id=audio_id,
         subtitle_stream_id=sub_sel.subtitle_stream_id,

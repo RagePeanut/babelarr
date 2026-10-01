@@ -1,0 +1,125 @@
+"""Minimal TMDB client for original language, posters, and localized titles.
+
+Plex items carry TMDB (and/or IMDB/TVDB) guids we use to look up authoritative
+metadata: the ``original_language`` field, language-tagged poster images, and
+localized titles (translations). Results are cached in-process to avoid
+hammering TMDB during full sweeps.
+"""
+
+from __future__ import annotations
+
+import logging
+from functools import lru_cache
+from typing import Dict, List, Optional
+
+import requests
+
+from .langcodes import normalize
+from .poster_selector import PosterView
+from .title_selector import TitleOptions
+
+log = logging.getLogger("babelarr.tmdb")
+
+_BASE = "https://api.themoviedb.org/3"
+_IMG_BASE = "https://image.tmdb.org/t/p/original"
+
+
+class TMDBClient:
+    def __init__(self, api_key: str, session: Optional[requests.Session] = None):
+        self._api_key = api_key
+        self._session = session or requests.Session()
+
+    def _get(self, path: str, **params) -> Optional[dict]:
+        params["api_key"] = self._api_key
+        try:
+            resp = self._session.get(f"{_BASE}{path}", params=params, timeout=15)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.RequestException as exc:
+            log.warning("TMDB request failed for %s: %s", path, exc)
+            return None
+
+    # -- original language ---------------------------------------------------
+
+    @lru_cache(maxsize=4096)
+    def movie_original_language(self, tmdb_id: int) -> Optional[str]:
+        data = self._get(f"/movie/{tmdb_id}")
+        return data.get("original_language") if data else None
+
+    @lru_cache(maxsize=4096)
+    def tv_original_language(self, tmdb_id: int) -> Optional[str]:
+        data = self._get(f"/tv/{tmdb_id}")
+        return data.get("original_language") if data else None
+
+    @lru_cache(maxsize=4096)
+    def find_by_external_id(self, external_id: str, source: str) -> Optional[dict]:
+        """Resolve an IMDB/TVDB id to TMDB results via the /find endpoint."""
+        return self._get(f"/find/{external_id}", external_source=source)
+
+    # -- posters -------------------------------------------------------------
+
+    @lru_cache(maxsize=2048)
+    def posters(self, tmdb_id: int, is_movie: bool) -> tuple:
+        """Return a tuple of PosterView for a title (all languages + textless).
+
+        ``include_image_language=null`` ensures the "no language" (textless)
+        posters are returned alongside language-tagged ones. The absolute image
+        URL is used as each poster's opaque ``key`` so the Plex layer can upload
+        it directly.
+        """
+        kind = "movie" if is_movie else "tv"
+        data = self._get(
+            f"/{kind}/{tmdb_id}/images", include_image_language="null,en"
+        )
+        # Without a language filter TMDB returns only the default-language set;
+        # re-query without the filter to get every language's posters.
+        data_all = self._get(f"/{kind}/{tmdb_id}/images", include_image_language="")
+        merged: Dict[str, dict] = {}
+        for d in (data, data_all):
+            if not d:
+                continue
+            for p in d.get("posters", []) or []:
+                fp = p.get("file_path")
+                if fp:
+                    merged[fp] = p
+        views: List[PosterView] = []
+        for fp, p in merged.items():
+            views.append(
+                PosterView(
+                    key=f"{_IMG_BASE}{fp}",
+                    language_code=p.get("iso_639_1"),  # None/"" -> textless
+                    vote_average=float(p.get("vote_average", 0.0) or 0.0),
+                )
+            )
+        return tuple(views)
+
+    # -- titles --------------------------------------------------------------
+
+    @lru_cache(maxsize=2048)
+    def title_options(self, tmdb_id: int, is_movie: bool) -> TitleOptions:
+        """Return localized titles + original title for a TMDB title."""
+        kind = "movie" if is_movie else "tv"
+        detail = self._get(f"/{kind}/{tmdb_id}") or {}
+        original_title = (
+            detail.get("original_title")
+            if is_movie
+            else detail.get("original_name")
+        )
+        original_language = detail.get("original_language")
+
+        by_language: Dict[str, str] = {}
+        trans = self._get(f"/{kind}/{tmdb_id}/translations") or {}
+        for t in trans.get("translations", []) or []:
+            lang = normalize(t.get("iso_639_1"))
+            if lang is None:
+                continue
+            data = t.get("data", {}) or {}
+            title = data.get("title") if is_movie else data.get("name")
+            if title and lang not in by_language:
+                by_language[lang] = title
+
+        return TitleOptions(
+            by_language=by_language,
+            original_title=original_title,
+            original_language=original_language,
+        )

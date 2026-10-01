@@ -12,7 +12,7 @@ import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-log = logging.getLogger("lingarr.webhook")
+log = logging.getLogger("babelarr.webhook")
 
 
 def _extract_payload(body: bytes, content_type: str) -> dict:
