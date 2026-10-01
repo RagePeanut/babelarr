@@ -174,3 +174,33 @@ rules:
 """
     with pytest.raises(RuleError, match="Unreachable"):
         parse_yaml(text, TITLE_TOKENS)
+
+
+@pytest.mark.skipif(
+    __import__("importlib").util.find_spec("yaml") is None,
+    reason="PyYAML not installed",
+)
+def test_yaml_off_token_not_coerced_to_bool():
+    # YAML parses bare `off` as the boolean False. The 'off' subtitle token must
+    # survive that round-trip rather than becoming "false".
+    text = """
+rules:
+  - eng: [off]
+  - default: [off]
+"""
+    rs = parse_yaml(text, SUBTITLE_TOKENS)
+    assert rs.match("eng") == ["off"]
+    assert rs.match("jpn") == ["off"]
+
+
+@pytest.mark.skipif(
+    __import__("importlib").util.find_spec("yaml") is None,
+    reason="PyYAML not installed",
+)
+def test_yaml_off_mixed_with_language():
+    text = """
+rules:
+  - eng: [fre, off]
+"""
+    rs = parse_yaml(text, SUBTITLE_TOKENS)
+    assert rs.match("eng") == ["fra", "off"]

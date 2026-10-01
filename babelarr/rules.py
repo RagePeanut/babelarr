@@ -235,10 +235,10 @@ def parse_rules_structure(raw, allowed_tokens: set) -> RuleSet:
                     "Each rules list item must be a single 'key: [prefs]' mapping"
                 )
             (k, v), = item.items()
-            entries.append((str(k), _prefs_to_str(v)))
+            entries.append((_coerce_scalar(k), _prefs_to_str(v)))
     elif isinstance(raw, dict):
         for k, v in raw.items():
-            entries.append((str(k), _prefs_to_str(v)))
+            entries.append((_coerce_scalar(k), _prefs_to_str(v)))
     else:
         raise RuleError("rules must be a list or mapping")
 
@@ -254,9 +254,23 @@ def parse_yaml(text: str, allowed_tokens: set) -> RuleSet:
     return parse_rules_structure(raw, allowed_tokens)
 
 
+# YAML 1.1 treats several bare words as booleans (off/no/false -> False,
+# on/yes/true -> True). Our reserved token ``off`` and some language-ish words
+# would therefore arrive as Python bools after yaml.safe_load. Map them back to
+# the string the user clearly wrote so e.g. ``- default: [off]`` works.
+_YAML_BOOL_TO_WORD = {False: "off", True: "on"}
+
+
+def _coerce_scalar(v) -> str:
+    """Stringify a YAML scalar, restoring bools that were really bare words."""
+    if isinstance(v, bool):
+        return _YAML_BOOL_TO_WORD[v]
+    return str(v)
+
+
 def _prefs_to_str(v) -> str:
     if v is None:
         return ""
     if isinstance(v, (list, tuple)):
-        return ",".join(str(x) for x in v)
-    return str(v)
+        return ",".join(_coerce_scalar(x) for x in v)
+    return _coerce_scalar(v)
