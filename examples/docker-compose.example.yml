@@ -1,0 +1,68 @@
+# Example docker-compose for Babelarr. Copy, edit the secrets/paths, and run.
+services:
+  # Babelarr - make Plex speak your languages
+  babelarr:
+    image: ghcr.io/ragepeanut/babelarr:latest   # or: build: ..
+    container_name: babelarr
+    environment:
+      - TZ=Europe/Paris
+      # Plex (Plex runs on the NAS host itself -> use the NAS LAN IP, not localhost)
+      - PLEX_URL=http://192.168.1.10:32400
+      - PLEX_TOKEN=xxxxxxxxxxxxxxxxxxxx
+      # Leave PLEX_LIBRARIES unset to process ALL movie + show libraries,
+      # or restrict with a comma-separated list of library names:
+      # - PLEX_LIBRARIES=Movies,TV Shows
+      # TMDB - authoritative source of each title's original language, posters,
+      # and localized titles.
+      - TMDB_API_KEY=xxxxxxxxxxxxxxxxxxxx
+
+      # --- Rules: four independent, OPT-IN concerns. ---
+      # Supply them EITHER via the unified config file (see babelarr.example.yml,
+      # mounted below) OR via these per-concern env vars. If BOTH are present,
+      # an env var OVERRIDES that concern's section in the config file.
+      # Every rule set uses the same ordered, top-to-bottom, first-match grammar.
+      - CONFIG_FILE=/config/babelarr.yml
+
+      # Example of overriding just one concern from the file (uncomment to use):
+      # Audio. Token: original (original-language track). No 'off' token.
+      #   default:original  -> always prefer the original-language audio ("OV")
+      #   deu:deu;default:eng -> German films in German, everything else English
+      # - AUDIO_RULES=default:original
+      # Subtitles. Tokens: off (force OFF), original.
+      # - SUBTITLE_RULES=eng:fre;fre:off;default:fre,eng
+      # Posters. Token: textless (TMDB "no language" poster; not guaranteed
+      # text-free, since TMDB is community-maintained).
+      # - POSTER_RULES=fre:fra;default:eng,textless
+      # Titles. Token: original. Script classes allowed (cjk/han/kana/hangul,
+      # latin, cyrillic, ...). Specific keys MUST come before broader ones.
+      # - TITLE_RULES=jpn:original;cjk:eng;default:original
+
+      # Don't overwrite posters/titles YOU locked by hand in Plex. Babelarr
+      # still re-manages its own values. Values: true (both, default) | false
+      # (neither) | poster | title | poster,title.
+      - SKIP_USER_LOCKED=true
+      # How Babelarr remembers which locked posters/titles are its own.
+      # REQUIRED when poster or title rules are used. No default (impactful).
+      #   file   -> JSON state file (invisible to Plex); see STATE_FILE below
+      #   labels -> fingerprint labels on each Plex item (visible in Plex UI)
+      - STATE_PERSISTENCE=file
+      - STATE_FILE=/config/babelarr-state.json   # default; only used by 'file'
+      # Optional audio-quality ceiling by channel count (6 = 5.1). Unset = no cap.
+      - MAX_AUDIO_CHANNELS=6
+      # Always-on full-library sweep cadence (minutes).
+      - SWEEP_INTERVAL_MINUTES=360
+      # How new media is caught between sweeps: webhook | polling | disabled
+      - NEW_MEDIA_MODE=webhook
+      - WEBHOOK_PORT=9999
+      - RECENT_POLL_INTERVAL_MINUTES=15
+      # Log intended changes without applying them.
+      - DRY_RUN=false
+    dns: [1.1.1.1, 8.8.8.8]
+    # Only needed when NEW_MEDIA_MODE=webhook. Point Plex's webhook at
+    # http://<NAS-IP>:9999  (Settings -> Webhooks in Plex, requires Plex Pass).
+    ports:
+      - 9999:9999
+    # Mount the dir holding your babelarr.yml (and any standalone rule files).
+    volumes:
+      - /volume1/docker/babelarr:/config
+    restart: unless-stopped

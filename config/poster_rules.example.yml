@@ -1,0 +1,21 @@
+# Optional readable form of POSTER_RULES.
+# Mount this file and set: POSTER_RULES=/config/poster_rules.yml
+#
+# Rules are an ORDERED list, evaluated TOP TO BOTTOM, first match wins (see the
+# subtitle example for the full semantics). Each key is a title's ORIGINAL
+# language (or a script class, or `default`). The value is an ordered list of
+# poster-language preferences; the first language with a poster available on
+# TMDB wins. Reserved token for posters:
+#   textless  -> a poster from TMDB's "no language / not specified" category.
+#
+# NOTE: `textless` maps to TMDB's "no language" category. Because TMDB is
+# community-maintained, such posters are NOT GUARANTEED to actually be free of
+# title text -- they are only categorized that way, and miscategorization
+# happens. Treat it as a best effort.
+#
+# If a matched rule's preferences are all unavailable, the poster is left
+# UNTOUCHED (never falls through to `default`).
+rules:
+  - fre: [fra]                 # French film -> French poster, else untouched
+  - jpn: [jpn, textless, eng]  # Japanese -> JP poster, else textless, else English
+  - default: [eng, textless]   # anything else -> English, else textless

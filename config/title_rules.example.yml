@@ -1,0 +1,26 @@
+# Optional readable form of TITLE_RULES.
+# Mount this file and set: TITLE_RULES=/config/title_rules.yml
+#
+# Rules are an ORDERED list, evaluated TOP TO BOTTOM, first match wins (see the
+# subtitle example for the full semantics). Each key is a title's ORIGINAL
+# language (or a script class, or `default`). The value is an ordered list of
+# title-language preferences; the first language with a title available on TMDB
+# wins. Reserved token for titles:
+#   original  -> TMDB's original title (e.g. the native/romaji title).
+#
+# Script classes are handy here. The CJK umbrella `cjk` covers the leaf classes
+# `han` (Chinese), `kana` (Japanese) and `hangul` (Korean); other classes are
+# `latin`, `cyrillic`, `greek`, `arabic`, `hebrew`, `devanagari`, `thai`, ...
+# A more specific key (a language, or a leaf like `kana`) MUST be declared
+# BEFORE a broader one (`cjk`, `default`) or Babelarr will refuse to start,
+# because the broader rule would make the specific one unreachable.
+#
+# Babelarr locks the Plex title field after setting it so the agent won't
+# revert it, and remembers (via STATE_PERSISTENCE) that the value is its own.
+# Titles YOU lock by hand are left alone unless you set SKIP_USER_LOCKED to
+# exclude 'title' (e.g. SKIP_USER_LOCKED=false or =poster).
+rules:
+  - jpn: [original]            # Japanese film -> keep its original title
+  - cjk: [eng]                 # other CJK (Chinese/Korean) -> English title
+  - cyrillic: [eng]            # Cyrillic-script originals -> English title
+  - default: [original]        # anything else -> original title

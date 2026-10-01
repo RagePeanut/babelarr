@@ -1,0 +1,24 @@
+# Optional readable form of AUDIO_RULES.
+# Mount this file and set: AUDIO_RULES=/config/audio_rules.yml
+#
+# Rules are an ORDERED list, evaluated TOP TO BOTTOM, first match wins (see the
+# subtitle example for the full semantics). Each key is a title's ORIGINAL
+# language (or a script class, or `default`). The value is an ordered list of
+# audio-language preferences; the first language with a track available on the
+# file wins. Within the chosen language the best track is picked automatically
+# (most channels <= MAX_AUDIO_CHANNELS, codec quality breaks ties).
+#
+# Reserved token for audio:
+#   original  -> the title's original-language track.
+# (There is no `off` token -- a video always plays some audio.)
+#
+# If a matched rule's preferences are all unavailable, audio is left UNTOUCHED
+# (never falls through to `default`).
+rules:
+  # "OV purist" default -- always prefer the original-language audio:
+  - default: [original]
+  #
+  # Other examples (pick one approach):
+  #   - default: [deu, original]   # German dub if present, else original
+  #   - jpn: [jpn]                 # keep anime in Japanese...
+  #   - default: [eng]             # ...everything else in English

@@ -1,4 +1,4 @@
-"""Lingarr entry point.
+"""Babelarr entry point.
 
 Starts the always-on full-library sweep loop, plus the configured new-media
 mechanism (webhook / polling / disabled).
@@ -10,7 +10,6 @@ import logging
 import os
 import signal
 import threading
-import time
 
 from .config import Config, ConfigError
 from .plex_client import connect
@@ -18,7 +17,7 @@ from .processor import Processor
 from .tmdb import TMDBClient
 from . import webhook as webhook_mod
 
-log = logging.getLogger("lingarr")
+log = logging.getLogger("babelarr")
 
 
 def _setup_logging() -> None:
@@ -48,14 +47,23 @@ def main() -> int:
         return 2
 
     log.info(
-        "Lingarr starting (mode=%s, sweep=%dm, dry_run=%s, max_channels=%s)",
+        "Babelarr starting (mode=%s, sweep=%dm, dry_run=%s, max_channels=%s, "
+        "skip_user_locked=%s, state=%s)",
         config.new_media_mode,
         config.sweep_interval_minutes,
         config.dry_run,
         config.max_audio_channels,
+        ",".join(sorted(config.skip_user_locked)) or "none",
+        config.state_persistence or "n/a (no poster/title rules)",
     )
-    if config.subtitle_rules.is_empty():
-        log.info("No subtitle rules configured; subtitles will be left untouched")
+    for name, rs in (
+        ("audio", config.audio_rules),
+        ("subtitle", config.subtitle_rules),
+        ("poster", config.poster_rules),
+        ("title", config.title_rules),
+    ):
+        if rs.is_empty():
+            log.info("No %s rules configured; that concern will be left untouched", name)
 
     server = connect(config.plex_url, config.plex_token)
     tmdb = TMDBClient(config.tmdb_api_key)
@@ -70,7 +78,6 @@ def main() -> int:
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
-    # Always-on full sweep (runs once immediately, then on interval).
     sweep_thread = threading.Thread(
         target=_loop,
         args=(config.sweep_interval_minutes, processor.full_sweep, stop, "full-sweep"),
@@ -98,7 +105,7 @@ def main() -> int:
 
     if http_server is not None:
         http_server.shutdown()
-    log.info("Lingarr stopped")
+    log.info("Babelarr stopped")
     return 0
 
 

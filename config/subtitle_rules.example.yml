@@ -1,15 +1,22 @@
 # Optional readable form of SUBTITLE_RULES.
 # Mount this file and set: SUBTITLE_RULES=/config/subtitle_rules.yml
 #
-# Each key is an AUDIO language; the value is an ordered list of SUBTITLE
-# language preferences (first available wins). An empty list disables subs for
-# that audio language. "default" applies to any audio language not listed.
+# Rules are an ORDERED list. At runtime Babelarr walks them TOP TO BOTTOM and
+# the FIRST matching key wins -- that rule is authoritative (it never falls
+# through to a later rule, not even `default`). Declaration ORDER MATTERS.
 #
-# Important: once a specific rule matches, if none of its preferences are
-# present the subtitles are turned OFF -- it never falls through to "default".
+# Each key is an original/audio language (or a script class, or `default`).
+# The value is an ordered list of subtitle preferences; the first one that is
+# actually present on the file wins. Reserved tokens for subtitles:
+#   off       -> force subtitles OFF
+#   original  -> the title's original-language subtitle
+#
+# If a matched rule's preferences are ALL missing, subtitles are left UNTOUCHED
+# (Plex decides) -- this is different from `off`, which explicitly disables them.
+# If NO rule matches (and there is no `default`), subtitles are left untouched.
 #
 # Language codes may be given in any ISO 639 form (fr / fre / fra all work).
 rules:
-  eng: [fre]           # English audio -> French subs, else OFF
-  fre: []              # French audio  -> no subtitles
-  default: [fre, eng]  # anything else -> French, then English, else OFF
+  - eng: [fre]              # English audio -> French subs, else untouched
+  - fre: [off]             # French audio  -> subtitles explicitly OFF
+  - default: [fre, eng]    # anything else -> French, then English, else untouched

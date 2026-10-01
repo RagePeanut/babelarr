@@ -7,4 +7,6 @@ __pycache__/
 venv/
 tests/
 *.md
+examples/
+config/
 docker-compose.yml
