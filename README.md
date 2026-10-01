@@ -156,12 +156,12 @@ to leave it untouched.
 
 ### 2. Per-concern environment variables
 
-`AUDIO_RULES`, `SUBTITLE_RULES`, `POSTER_RULES`, `TITLE_RULES`. Each accepts
+`AUDIO_RULES`, `SUBTITLES_RULES`, `POSTER_RULES`, `TITLE_RULES`. Each accepts
 either form (auto-detected):
 
 * **Inline string** — entries separated by `;`, preferences by `,`:
   ```
-  SUBTITLE_RULES=eng:fre;fre:off;default:fre,eng
+  SUBTITLES_RULES=eng:fre;fre:off;default:fre,eng
   ```
 * **A path to a standalone YAML file** (per concern), using a `rules:` list:
   ```yaml
@@ -212,7 +212,7 @@ AUDIO_RULES=default:deu,original
 AUDIO_RULES=jpn:jpn;default:eng
 ```
 
-### Subtitles — `SUBTITLE_RULES`
+### Subtitles — `SUBTITLES_RULES`
 
 Keyed by the **audio language that will actually play** — i.e. the track
 `AUDIO_RULES` selected. If audio was left untouched, the language of Plex's
@@ -296,7 +296,7 @@ come from a config file and/or `*_RULES` env vars — see
 | `PLEX_LIBRARIES` | *(all movie + show libraries)* | Comma-separated library names to process. |
 | `CONFIG_FILE` | `/config/babelarr.yml` | Path to the unified config file (optional if you use env vars). |
 | `AUDIO_RULES` | *(unset = untouched)* | Audio rule set. Token: `original`. **Overrides** the file's `audio:`. |
-| `SUBTITLE_RULES` | *(unset = untouched)* | Subtitle rule set. Tokens: `off`, `original`. **Overrides** the file's `subtitles:`. |
+| `SUBTITLES_RULES` | *(unset = untouched)* | Subtitle rule set. Tokens: `off`, `original`. **Overrides** the file's `subtitles:`. |
 | `POSTER_RULES` | *(unset = untouched)* | Poster rule set. Token: `textless`. **Overrides** the file's `poster:`. |
 | `TITLE_RULES` | *(unset = untouched)* | Title rule set. Token: `original`. **Overrides** the file's `title:`. |
 | `SKIP_USER_LOCKED` | `true` | Which **user-locked** fields to leave alone: `true`/`all`, `false`/`none`, `poster`, `title`, or `poster,title`. |
@@ -345,7 +345,7 @@ services:
       - PLEX_TOKEN=xxxxxxxxxxxx
       - TMDB_API_KEY=xxxxxxxxxxxx
       - AUDIO_RULES=default:original
-      - SUBTITLE_RULES=eng:fre;fre:off;default:fre,eng
+      - SUBTITLES_RULES=eng:fre;fre:off;default:fre,eng
       - POSTER_RULES=fre:fra;default:eng,textless
       - TITLE_RULES=jpn:original;cjk:eng;default:original
       - MAX_AUDIO_CHANNELS=6

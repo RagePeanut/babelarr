@@ -1,5 +1,5 @@
-# Optional readable form of SUBTITLE_RULES.
-# Mount this file and set: SUBTITLE_RULES=/config/subtitle_rules.yml
+# Optional readable form of SUBTITLES_RULES.
+# Mount this file and set: SUBTITLES_RULES=/config/subtitles_rules.yml
 #
 # Rules are an ORDERED list. At runtime Babelarr walks them TOP TO BOTTOM and
 # the FIRST matching key wins -- that rule is authoritative (it never falls

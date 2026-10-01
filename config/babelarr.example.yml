@@ -21,7 +21,7 @@
 #   title      -> original            (TMDB original title)
 #
 # NOTE on precedence: setting the matching *_RULES environment variable
-# (AUDIO_RULES / SUBTITLE_RULES / POSTER_RULES / TITLE_RULES) OVERRIDES that
+# (AUDIO_RULES / SUBTITLES_RULES / POSTER_RULES / TITLE_RULES) OVERRIDES that
 # concern's section here.
 
 audio:
