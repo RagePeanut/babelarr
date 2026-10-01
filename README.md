@@ -24,11 +24,6 @@ added items (no Plex Pass).
 > Plex runs on the host (e.g. your NAS) — Babelarr talks to it over the network
 > via `PLEX_URL`. Plex does **not** need to be in the same compose stack.
 
-> **Renamed from Lingarr.** Babelarr is the evolution of Lingarr (which only did
-> audio/subtitle tracks). The track behavior is unchanged in spirit; posters and
-> titles are new, and the rule grammar was unified (see
-> [Migration](#migration-from-lingarr)).
-
 ---
 
 ## The rule model (read this first)
@@ -202,7 +197,7 @@ audio default as-is.
 Common presets:
 
 ```
-# "OV purist" — always original-language audio (the old Lingarr behavior):
+# "OV purist" — always original-language audio:
 AUDIO_RULES=default:original
 
 # Native-dub watcher — German where available, else the original:
@@ -374,27 +369,6 @@ The selection logic (`babelarr/selector.py`, `poster_selector.py`,
 `title_selector.py`) and the rule engine (`babelarr/rules.py`,
 `langscript.py`) are pure (no Plex/network dependencies) and fully unit-tested
 in `tests/`.
-
----
-
-## Migration from Lingarr
-
-* The package/image is now **`babelarr`** (was `lingarr`).
-* **Breaking: audio is now rule-driven.** Lingarr always set audio to the
-  original language. Babelarr requires explicit **`AUDIO_RULES`**; to keep the
-  old behavior set `AUDIO_RULES=default:original`. Unset = audio untouched.
-* **Breaking: subtitle "OFF".** Previously an *empty* preference list meant
-  "subtitles off". Now use the explicit **`off`** token (`fre:off`). An empty
-  list / a matched-but-unavailable rule now means **leave untouched** (let Plex
-  decide) — a deliberately different outcome from `off`.
-* **Breaking: at least one rule set is now required** — Babelarr refuses to
-  start with no rules configured.
-* **New:** `AUDIO_RULES`, `POSTER_RULES`, `TITLE_RULES`, the unified
-  **`CONFIG_FILE`**, `SKIP_USER_LOCKED` (with the fingerprint-based
-  **`STATE_PERSISTENCE`** / `STATE_FILE`), script-class keys, and the
-  `original` / `textless` tokens.
-* Rule sets are now **ordered and validated**; see
-  [the rule model](#the-rule-model-read-this-first).
 
 ---
 
