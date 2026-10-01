@@ -37,8 +37,16 @@ services:
       # latin, cyrillic, ...). Specific keys MUST come before broader ones.
       # - TITLE_RULES=jpn:original;cjk:eng;default:original
 
-      # Only touch posters/titles you have NOT hand-picked (locked) in Plex.
-      - ONLY_REPLACE_UNLOCKED=true
+      # Don't overwrite posters/titles YOU locked by hand in Plex. Babelarr
+      # still re-manages its own values. Values: true (both, default) | false
+      # (neither) | poster | title | poster,title.
+      - SKIP_USER_LOCKED=true
+      # How Babelarr remembers which locked posters/titles are its own.
+      # REQUIRED when poster or title rules are used. No default (impactful).
+      #   file   -> JSON state file (invisible to Plex); see STATE_FILE below
+      #   labels -> fingerprint labels on each Plex item (visible in Plex UI)
+      - STATE_PERSISTENCE=file
+      - STATE_FILE=/config/babelarr-state.json   # default; only used by 'file'
       # Optional audio-quality ceiling by channel count (6 = 5.1). Unset = no cap.
       - MAX_AUDIO_CHANNELS=6
       # Always-on full-library sweep cadence (minutes).

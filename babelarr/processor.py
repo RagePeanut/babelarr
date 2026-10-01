@@ -33,6 +33,7 @@ from .plex_client import (
 )
 from .poster_selector import select_poster
 from .selector import select_for_part
+from .state import StatePersistence, build_state
 from .title_selector import select_title
 from .tmdb import TMDBClient
 
@@ -40,10 +41,14 @@ log = logging.getLogger("babelarr.processor")
 
 
 class Processor:
-    def __init__(self, config: Config, server: PlexServer, tmdb: TMDBClient):
+    def __init__(self, config: Config, server: PlexServer, tmdb: TMDBClient,
+                 state: StatePersistence = None):
         self.config = config
         self.server = server
         self.tmdb = tmdb
+        self.state = state if state is not None else build_state(
+            config.state_persistence or "file", config.state_file, config.dry_run
+        )
         self._locks = defaultdict(threading.Lock)
         self._locks_guard = threading.Lock()
 
@@ -130,8 +135,8 @@ class Processor:
                 posters = self.tmdb.posters(tmdb_id, is_movie)
                 key = select_poster(posters, original_language, self.config.poster_rules)
                 if key:
-                    apply_poster(item, key, self.config.only_replace_unlocked,
-                                 self.config.dry_run)
+                    apply_poster(item, key, self.config.skip_user_locked,
+                                 self.state, self.config.dry_run)
             except Exception:  # pragma: no cover - defensive
                 log.exception("Failed poster for %s", getattr(item, "title", "?"))
 
@@ -140,8 +145,8 @@ class Processor:
                 options = self.tmdb.title_options(tmdb_id, is_movie)
                 title = select_title(options, self.config.title_rules)
                 if title:
-                    apply_title(item, title, self.config.only_replace_unlocked,
-                                self.config.dry_run)
+                    apply_title(item, title, self.config.skip_user_locked,
+                                self.state, self.config.dry_run)
             except Exception:  # pragma: no cover - defensive
                 log.exception("Failed title for %s", getattr(item, "title", "?"))
 
@@ -157,6 +162,7 @@ class Processor:
             elif sec.type == _SHOW:
                 for show in sec.all():
                     self.process_show(show)
+        self.state.flush()
         log.info("Full sweep complete")
 
     def recent_sweep(self, limit: int = 50) -> None:
@@ -174,6 +180,7 @@ class Processor:
                         self.process_episode(item)
                     elif item.type == "show":
                         self.process_show(item)
+        self.state.flush()
 
     def process_rating_key(self, rating_key) -> None:
         """Process a single item by ratingKey (webhook handler)."""
@@ -186,3 +193,4 @@ class Processor:
             self.process_show(item)
         else:
             log.debug("Ignoring webhook item of type %s", item.type)
+        self.state.flush()

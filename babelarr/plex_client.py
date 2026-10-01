@@ -2,20 +2,21 @@
 
 Wraps python-plexapi. Translates Plex media parts into the lightweight views
 consumed by the pure selectors, and writes chosen defaults / posters / titles
-back to Plex. Honors the ``ONLY_REPLACE_UNLOCKED`` guard so hand-picked
-(locked) posters and titles are never clobbered.
+back to Plex. Honors the ``SKIP_USER_LOCKED`` guard (via fingerprint state) so
+posters/titles the *user* locked by hand are never clobbered, while Babelarr's
+own locked values are still re-managed.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-from typing import Iterable, List, Optional
-
-from plexapi.server import PlexServer
+from typing import TYPE_CHECKING, Iterable, List, Optional
 
 from .selector import AudioStreamView, SubtitleStreamView, Selection
-from .tmdb import TMDBClient
+
+if TYPE_CHECKING:  # import only for type hints; avoids a hard requests dependency
+    from .tmdb import TMDBClient
 
 log = logging.getLogger("babelarr.plex")
 
@@ -27,7 +28,9 @@ _IMDB_RE = re.compile(r"imdb://(tt\d+)")
 _TVDB_RE = re.compile(r"tvdb://(\d+)")
 
 
-def connect(url: str, token: str) -> PlexServer:
+def connect(url: str, token: str):
+    from plexapi.server import PlexServer  # lazy: keeps this module importable
+
     return PlexServer(url, token)
 
 
@@ -165,34 +168,94 @@ def apply_selection(part, selection: Selection, dry_run: bool) -> bool:
 
 # -- poster / title field locking -------------------------------------------
 
+# Plex field names behind each concern (for lock inspection).
+_FIELD_TITLE = "title"
+_FIELD_POSTER = "thumb"
+
+
 def _is_field_locked(item, field_name: str) -> bool:
-    """True if a metadata field is locked in Plex (user hand-picked it)."""
+    """True if a metadata field is locked in Plex."""
     for f in getattr(item, "fields", []) or []:
         if getattr(f, "name", None) == field_name and getattr(f, "locked", False):
             return True
     return False
 
 
-def apply_poster(item, poster_url: str, only_unlocked: bool, dry_run: bool) -> bool:
-    """Upload/select a poster by URL. Skips locked posters when guarded."""
-    if only_unlocked and _is_field_locked(item, "thumb"):
-        log.debug("  poster locked, skipping %s", getattr(item, "title", "?"))
+def _user_owns_field(item, field_name: str, current_value, state) -> bool:
+    """True if a LOCKED field was last set by the user, not Babelarr.
+
+    A field is "user owned" when it is locked AND its current value does not
+    match the fingerprint Babelarr recorded for it. An unlocked field is never
+    user-owned (Babelarr is free to set it).
+    """
+    if not _is_field_locked(item, field_name):
+        return False
+    return not state.is_ours(item, field_name, current_value)
+
+
+def _selected_poster_key(item):
+    """The ratingKey of the item's currently-selected poster, or ``None``.
+
+    For a poster Babelarr uploaded this is a stable ``upload://posters/<hash>``
+    id (hash of the image bytes), persisting across normal scans/refreshes. If
+    the user swaps the poster the selected id changes, letting us tell our own
+    poster from one the user picked.
+    """
+    try:
+        for p in item.posters():
+            if getattr(p, "selected", False):
+                return getattr(p, "ratingKey", None)
+    except Exception:  # pragma: no cover - network/plex variance
+        pass
+    return None
+
+
+def apply_poster(item, poster_url, skip_user_locked, state, dry_run: bool) -> bool:
+    """Set a poster, then lock it and fingerprint the resulting selection.
+
+    Skips only when the poster field is locked AND user-owned (its selected
+    poster's ratingKey doesn't match what Babelarr recorded) AND ``poster`` is
+    in ``skip_user_locked``. Babelarr's own locked posters are re-managed freely.
+    """
+    if "poster" in skip_user_locked and _user_owns_field(
+        item, _FIELD_POSTER, _selected_poster_key(item), state
+    ):
+        log.debug("  poster user-locked, skipping %s", getattr(item, "title", "?"))
         return False
     log.info("  poster -> %s%s", poster_url, " (dry-run)" if dry_run else "")
-    if not dry_run:
-        item.uploadPoster(url=poster_url)
+    if dry_run:
+        return True
+    item.uploadPoster(url=poster_url)
+    item.lockPoster()
+    # P3: read back the now-selected poster's ratingKey and fingerprint THAT, so
+    # a later user swap (which changes the selected poster) is detectable.
+    try:
+        item.reload()
+    except Exception:  # pragma: no cover - defensive
+        pass
+    key = _selected_poster_key(item)
+    if key is not None:
+        state.record(item, _FIELD_POSTER, key)
     return True
 
 
-def apply_title(item, title: str, only_unlocked: bool, dry_run: bool) -> bool:
-    """Set and lock the display title. Skips locked titles when guarded."""
-    if only_unlocked and _is_field_locked(item, "title"):
-        log.debug("  title locked, skipping %s", getattr(item, "title", "?"))
+def apply_title(item, title: str, skip_user_locked, state, dry_run: bool) -> bool:
+    """Set + lock the display title, then fingerprint it.
+
+    Skips only when the title is locked AND user-owned (current title doesn't
+    match our recorded fingerprint) AND ``title`` is in ``skip_user_locked``.
+    """
+    if "title" in skip_user_locked and _user_owns_field(
+        item, _FIELD_TITLE, getattr(item, "title", None), state
+    ):
+        log.debug("  title user-locked, skipping %s", getattr(item, "title", "?"))
         return False
-    if getattr(item, "title", None) == title:
+    already_set = getattr(item, "title", None) == title
+    if already_set and _is_field_locked(item, _FIELD_TITLE):
+        state.record(item, _FIELD_TITLE, title)  # ensure fingerprint, no write
         return False
     log.info("  title -> %r%s", title, " (dry-run)" if dry_run else "")
     if not dry_run:
-        # Lock the field so Plex's agent won't revert it on the next refresh.
         item.editTitle(title, locked=True)
+    state.record(item, _FIELD_TITLE, title)
     return True

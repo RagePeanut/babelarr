@@ -48,12 +48,13 @@ def main() -> int:
 
     log.info(
         "Babelarr starting (mode=%s, sweep=%dm, dry_run=%s, max_channels=%s, "
-        "only_replace_unlocked=%s)",
+        "skip_user_locked=%s, state=%s)",
         config.new_media_mode,
         config.sweep_interval_minutes,
         config.dry_run,
         config.max_audio_channels,
-        config.only_replace_unlocked,
+        ",".join(sorted(config.skip_user_locked)) or "none",
+        config.state_persistence or "n/a (no poster/title rules)",
     )
     for name, rs in (
         ("audio", config.audio_rules),

@@ -15,9 +15,10 @@
 # BEFORE a broader one (`cjk`, `default`) or Babelarr will refuse to start,
 # because the broader rule would make the specific one unreachable.
 #
-# When a title set to the original is unlocked, Babelarr locks the Plex title
-# field so the agent won't revert it. Set ONLY_REPLACE_UNLOCKED=false to also
-# overwrite titles you have hand-edited (locked) in Plex.
+# Babelarr locks the Plex title field after setting it so the agent won't
+# revert it, and remembers (via STATE_PERSISTENCE) that the value is its own.
+# Titles YOU lock by hand are left alone unless you set SKIP_USER_LOCKED to
+# exclude 'title' (e.g. SKIP_USER_LOCKED=false or =poster).
 rules:
   - jpn: [original]            # Japanese film -> keep its original title
   - cjk: [eng]                 # other CJK (Chinese/Korean) -> English title

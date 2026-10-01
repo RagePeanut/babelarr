@@ -234,11 +234,51 @@ Keyed by the title's **original language**. Preferences are title languages;
 `original` resolves to TMDB's original title. When Babelarr sets a title it also
 **locks** the Plex title field so the agent won't revert it on the next refresh.
 
-### Protecting hand-picked artwork/titles — `ONLY_REPLACE_UNLOCKED`
+### Protecting hand-picked artwork/titles — `SKIP_USER_LOCKED` + state
 
-Defaults to `true`: Babelarr will **not** overwrite a poster or title whose Plex
-field you've **locked** (hand-picked). Set it to `false` to let Babelarr manage
-even locked fields.
+When Babelarr sets a poster or title it **locks** the Plex field (so Plex's
+agent won't revert it) and records a **fingerprint** of the value it wrote. On
+later runs it compares that fingerprint to the field's current value to tell
+*its own* locked value apart from one **you** locked by hand:
+
+* locked field whose value still matches Babelarr's fingerprint → **ours** →
+  Babelarr may update it (e.g. when your rules change);
+* locked field whose value **doesn't** match (you edited/swapped it) or that
+  Babelarr never set → **user-owned**.
+
+`SKIP_USER_LOCKED` decides what happens to **user-owned** fields:
+
+| Value | Effect |
+|-------|--------|
+| `true` / `all` | protect **both** user-locked posters and titles (default) |
+| `false` / `none` | protect **neither** — overwrite even your hand-locked fields |
+| `poster` | protect only user-locked **posters** |
+| `title` | protect only user-locked **titles** |
+| `poster,title` | both (same as `true`) |
+
+(Babelarr's *own* locked fields are always re-manageable regardless — this guard
+only concerns fields **you** locked.)
+
+#### `STATE_PERSISTENCE` — how Babelarr remembers its own values (**required**)
+
+Because this all hinges on fingerprints, you must choose where they're stored.
+`STATE_PERSISTENCE` is **required** when poster or title rules are used (it has
+**no default** — the choice is impactful). It's irrelevant, and not required,
+for audio/subtitle-only setups.
+
+| Value | Mechanism | Trade-off |
+|-------|-----------|-----------|
+| `file` | A JSON file (`STATE_FILE`, default `/config/babelarr-state.json`), keyed by each item's TMDB/IMDB guid. | Invisible to Plex; survives library rebuilds. External file to keep. If lost/corrupt, Babelarr forgets ownership and backs off (never clobbers). |
+| `labels` | Plex labels `babelarr-locked:<field>:<hash>` on each item. | All state lives in Plex (nothing external). **But the labels are visible/editable in the Plex UI**: if you edit or remove one, that field looks user-owned and Babelarr stops managing it (safe, but it won't update on rule changes). |
+
+Both mechanisms fail toward **"don't clobber."** `file` is the usual choice;
+pick `labels` only if you specifically want all state inside Plex.
+
+> Note on posters: Babelarr fingerprints the uploaded poster's resulting
+> identifier, so if you later swap the poster by hand it's detected as yours and
+> protected. If an item is removed/rebuilt or its uploaded images are purged by
+> Plex, the poster field also loses its lock — so Babelarr simply sets it again
+> (it never overwrites a *locked* poster it doesn't recognize).
 
 ---
 
@@ -259,7 +299,9 @@ come from a config file and/or `*_RULES` env vars — see
 | `SUBTITLE_RULES` | *(unset = untouched)* | Subtitle rule set. Tokens: `off`, `original`. **Overrides** the file's `subtitles:`. |
 | `POSTER_RULES` | *(unset = untouched)* | Poster rule set. Token: `textless`. **Overrides** the file's `poster:`. |
 | `TITLE_RULES` | *(unset = untouched)* | Title rule set. Token: `original`. **Overrides** the file's `title:`. |
-| `ONLY_REPLACE_UNLOCKED` | `true` | Skip posters/titles whose Plex field is locked (hand-picked). |
+| `SKIP_USER_LOCKED` | `true` | Which **user-locked** fields to leave alone: `true`/`all`, `false`/`none`, `poster`, `title`, or `poster,title`. |
+| `STATE_PERSISTENCE` | — (**required** if poster/title rules used) | How Babelarr remembers its own values: `file` or `labels`. No default. |
+| `STATE_FILE` | `/config/babelarr-state.json` | Path to the JSON state file (only used when `STATE_PERSISTENCE=file`). |
 | `MAX_AUDIO_CHANNELS` | *(unset = no cap)* | Ceiling on audio channels (e.g. `6` = 5.1). |
 | `SWEEP_INTERVAL_MINUTES` | `360` | Cadence of the always-on full-library sweep. |
 | `NEW_MEDIA_MODE` | `disabled` | `webhook`, `polling`, or `disabled`. |
@@ -348,7 +390,8 @@ in `tests/`.
 * **Breaking: at least one rule set is now required** — Babelarr refuses to
   start with no rules configured.
 * **New:** `AUDIO_RULES`, `POSTER_RULES`, `TITLE_RULES`, the unified
-  **`CONFIG_FILE`**, `ONLY_REPLACE_UNLOCKED`, script-class keys, and the
+  **`CONFIG_FILE`**, `SKIP_USER_LOCKED` (with the fingerprint-based
+  **`STATE_PERSISTENCE`** / `STATE_FILE`), script-class keys, and the
   `original` / `textless` tokens.
 * Rule sets are now **ordered and validated**; see
   [the rule model](#the-rule-model-read-this-first).

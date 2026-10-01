@@ -21,6 +21,11 @@ Rules can be supplied two ways:
 section in the config file. Each concern is independent; a concern with no rules
 from either source is simply left untouched. At least one concern must be
 configured (from either source), or startup fails.
+
+Poster/title changes are protected by ``SKIP_USER_LOCKED`` plus a fingerprint
+state recorded via ``STATE_PERSISTENCE`` (``file`` or ``labels``) — see
+``state.py``. ``STATE_PERSISTENCE`` is required only when poster or title rules
+are in use.
 """
 
 from __future__ import annotations
@@ -53,6 +58,10 @@ POSTER_TOKENS = {TOKEN_TEXTLESS}
 TITLE_TOKENS = {TOKEN_ORIGINAL}
 
 DEFAULT_CONFIG_PATH = "/config/babelarr.yml"
+DEFAULT_STATE_FILE = "/config/babelarr-state.json"
+
+# Lockable field types that SKIP_USER_LOCKED can protect.
+LOCKABLE_FIELDS = ("poster", "title")
 
 # concern name -> (env var, config-file key, allowed tokens)
 _CONCERNS = {
@@ -139,6 +148,54 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _parse_skip_user_locked(raw: Optional[str]) -> set:
+    """Parse SKIP_USER_LOCKED into a set of protected field types.
+
+    Values (comma-separated, case-insensitive):
+      * ``true`` / ``all``       -> protect both (poster + title)  [default]
+      * ``false`` / ``none``     -> protect neither
+      * ``poster`` / ``title``   -> protect only those listed
+    """
+    if raw is None or raw.strip() == "":
+        return set(LOCKABLE_FIELDS)  # default: protect both
+    tokens = [t.strip().lower() for t in raw.split(",") if t.strip()]
+    if not tokens:
+        return set(LOCKABLE_FIELDS)
+    # Whole-value aliases (only valid on their own).
+    if len(tokens) == 1 and tokens[0] in ("true", "all", "false", "none"):
+        return set(LOCKABLE_FIELDS) if tokens[0] in ("true", "all") else set()
+    out = set()
+    for t in tokens:
+        if t in ("true", "all", "false", "none"):
+            raise ConfigError(
+                f"SKIP_USER_LOCKED: {t!r} cannot be combined with field names; "
+                f"use it alone, or list fields from {LOCKABLE_FIELDS}"
+            )
+        if t not in LOCKABLE_FIELDS:
+            raise ConfigError(
+                f"SKIP_USER_LOCKED: unknown field {t!r}; "
+                f"valid: {', '.join(LOCKABLE_FIELDS)}, true, false"
+            )
+        out.add(t)
+    return out
+
+
+def _parse_state_persistence() -> str:
+    """STATE_PERSISTENCE is REQUIRED: 'labels' or 'file' (no default)."""
+    raw = os.environ.get("STATE_PERSISTENCE", "").strip().lower()
+    if not raw:
+        raise ConfigError(
+            "STATE_PERSISTENCE is required and has no default (the choice is "
+            "impactful). Set it to 'file' (JSON state file, invisible to Plex) "
+            "or 'labels' (fingerprint labels stored on each Plex item)."
+        )
+    if raw not in ("labels", "file"):
+        raise ConfigError(
+            f"STATE_PERSISTENCE must be 'labels' or 'file', got {raw!r}"
+        )
+    return raw
+
+
 @dataclass
 class Config:
     plex_url: str
@@ -150,7 +207,9 @@ class Config:
     poster_rules: RuleSet
     title_rules: RuleSet
     max_audio_channels: Optional[int]
-    only_replace_unlocked: bool
+    skip_user_locked: set  # subset of {"poster", "title"}
+    state_persistence: str  # "labels" | "file"
+    state_file: str
     sweep_interval_minutes: int
     new_media_mode: str  # webhook | polling | disabled
     webhook_port: int
@@ -201,6 +260,11 @@ class Config:
                 "least one of: audio, subtitles, poster, title."
             )
 
+        # State persistence tracks poster/title locks; it's only needed (and so
+        # only required) when poster or title rules are actually in use.
+        needs_state = not rules["poster"].is_empty() or not rules["title"].is_empty()
+        state_persistence = _parse_state_persistence() if needs_state else ""
+
         return cls(
             plex_url=plex_url,
             plex_token=plex_token,
@@ -211,7 +275,11 @@ class Config:
             poster_rules=rules["poster"],
             title_rules=rules["title"],
             max_audio_channels=max_channels,
-            only_replace_unlocked=_env_bool("ONLY_REPLACE_UNLOCKED", True),
+            skip_user_locked=_parse_skip_user_locked(
+                os.environ.get("SKIP_USER_LOCKED")
+            ),
+            state_persistence=state_persistence,
+            state_file=os.environ.get("STATE_FILE", "").strip() or DEFAULT_STATE_FILE,
             sweep_interval_minutes=_env_int("SWEEP_INTERVAL_MINUTES", 360),
             new_media_mode=mode,
             webhook_port=_env_int("WEBHOOK_PORT", 9999),
