@@ -176,25 +176,44 @@ def test_poster_uploads_when_url_not_a_candidate():
     assert item.poster_selects == []
 
 
+def _record_poster(st, item, selected_key, url):
+    """Seed prior state: resulting selected key + intended url."""
+    st.record(item, "thumb", selected_key)
+    st.record(item, "thumb_url", url)
+
+
 def test_poster_not_reselected_when_already_ours():
     # Our poster already selected + already the wanted one -> skip (no thrash).
     sel = FakePoster(URL, selected=True)
     item = FakeItem(poster_locked=True, candidates=[sel, FakePoster(URL2)])
     st = LabelState()
-    st.record(item, "thumb", URL)          # recorded resulting key = URL
+    _record_poster(st, item, URL, URL)     # selected key = URL, wanted = URL
     changed = apply_poster(item, URL, {"poster"}, st, dry_run=False)
     assert not changed
     assert item.poster_selects == []
     assert item.poster_uploads == []
 
 
+def test_uploaded_poster_not_reuploaded_when_already_ours():
+    # The upload-fallback case: our poster is an upload:// (key != URL), already
+    # ours and corresponds to the wanted URL -> must NOT re-upload every sweep.
+    sel = FakePoster("upload://posters/mine", selected=True)
+    item = FakeItem(poster_locked=True, candidates=[sel])  # URL not a candidate
+    st = LabelState()
+    _record_poster(st, item, "upload://posters/mine", URL)
+    changed = apply_poster(item, URL, {"poster"}, st, dry_run=False)
+    assert not changed
+    assert item.poster_uploads == []       # <- the bug this guards against
+    assert item.poster_selects == []
+
+
 def test_poster_rule_change_reapplied_even_when_protected():
-    # Corrected P3: the selected poster IS ours (matches recorded), but the rule
-    # now wants a DIFFERENT poster -> re-apply, even with poster protected.
+    # The selected poster IS ours, but the rule now wants a DIFFERENT url
+    # (wanted=False) -> re-apply, even with poster protected.
     sel = FakePoster(URL, selected=True)
     item = FakeItem(poster_locked=True, candidates=[sel, FakePoster(URL2)])
     st = LabelState()
-    st.record(item, "thumb", URL)          # ours = the currently-selected URL
+    _record_poster(st, item, URL, URL)     # ours; wanted url was URL
     changed = apply_poster(item, URL2, {"poster"}, st, dry_run=False)
     assert changed
     assert item.poster_selects == [URL2]   # switched to the new rule's poster
@@ -206,7 +225,7 @@ def test_poster_user_swap_preserved():
     swapped = FakePoster("upload://posters/userpick", selected=True)
     item = FakeItem(poster_locked=True, candidates=[swapped, FakePoster(URL)])
     st = LabelState()
-    st.record(item, "thumb", URL)          # we last set URL; user then swapped
+    _record_poster(st, item, URL, URL)     # we last set URL; user then swapped
     changed = apply_poster(item, URL, {"poster"}, st, dry_run=False)
     assert not changed
     assert item.poster_selects == []
@@ -217,7 +236,7 @@ def test_poster_user_swap_overwritten_when_not_protected():
     swapped = FakePoster("upload://posters/userpick", selected=True)
     item = FakeItem(poster_locked=True, candidates=[swapped, FakePoster(URL)])
     st = LabelState()
-    st.record(item, "thumb", URL)
+    _record_poster(st, item, URL, URL)
     changed = apply_poster(item, URL, set(), st, dry_run=False)
     assert changed
     assert item.poster_selects == [URL]    # re-selected our wanted poster

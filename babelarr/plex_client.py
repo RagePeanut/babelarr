@@ -233,6 +233,10 @@ def apply_selection(part, selection: Selection, dry_run: bool) -> bool:
 # Plex field names behind each concern (for lock inspection).
 _FIELD_TITLE = "title"
 _FIELD_POSTER = "thumb"
+# Secondary state slot: the intended source URL of the poster Babelarr set.
+# Paired with _FIELD_POSTER (the resulting selected key) so we can answer both
+# "is the on-disk poster ours?" and "does it correspond to the wanted URL?".
+_FIELD_POSTER_URL = "thumb_url"
 
 
 def _is_field_locked(item, field_name: str) -> bool:
@@ -293,30 +297,37 @@ def _selected_poster_key(item):
 def apply_poster(item, poster_url, skip_user_locked, state, dry_run: bool) -> bool:
     """Set the poster to ``poster_url``, lock it, and fingerprint the result.
 
-    Recognition fingerprints the **actually-selected poster's key** (the source
-    URL when selected from candidates, else the upload id) -- so Babelarr can
-    tell its own poster from a user swap AND notice when a rule change now wants
-    a different poster. Behavior for a locked poster:
+    Babelarr records TWO things when it sets a poster: the **resulting selected
+    key** (``thumb``) and the **intended source URL** (``thumb_url``). Together
+    they answer both questions, for selected AND uploaded posters alike:
 
-    * currently-selected poster isn't the one we recorded -> treat as user-owned
-      (a hand-pick/swap); skip when ``poster`` is in ``skip_user_locked``.
-    * it IS the one we recorded and already equals the wanted poster -> nothing
-      to do; skip (no re-upload every sweep).
-    * it IS ours but the wanted poster differs (rule changed) -> re-apply.
+    * ``ours`` = the currently-selected poster's key matches ``thumb`` -> the
+      poster in effect is the one Babelarr set (vs. a user hand-pick/swap).
+    * ``wanted`` = the recorded ``thumb_url`` matches this run's ``poster_url``
+      -> the poster Babelarr set corresponds to what the rules want now.
+
+    Behavior for a locked poster:
+    * not ``ours`` -> user hand-picked/swapped; skip when ``poster`` is in
+      ``skip_user_locked``.
+    * ``ours`` and ``wanted`` -> already correct; skip (no re-upload/select
+      every sweep -- works for uploaded posters too, since ``wanted`` compares
+      URL-to-URL, never key-to-URL).
+    * ``ours`` but not ``wanted`` -> rules changed; re-apply.
 
     Setting prefers selecting an existing candidate over re-uploading.
     """
     current_key = _selected_poster_key(item)
     locked = _is_field_locked(item, _FIELD_POSTER)
     ours = state.is_ours(item, _FIELD_POSTER, current_key)
+    wanted = state.is_ours(item, _FIELD_POSTER_URL, poster_url)
 
     # User hand-picked / swapped (locked, and the on-disk poster isn't ours).
     if locked and not ours and "poster" in skip_user_locked:
         log.debug("  poster user-locked, skipping %s", getattr(item, "title", "?"))
         return False
 
-    # Already our poster AND it's already the wanted one -> nothing to do.
-    if ours and current_key == poster_url:
+    # Already our poster AND it already corresponds to the wanted URL -> skip.
+    if ours and wanted:
         log.debug("  poster already set by Babelarr, skipping %s",
                   getattr(item, "title", "?"))
         return False
@@ -334,14 +345,15 @@ def apply_poster(item, poster_url, skip_user_locked, state, dry_run: bool) -> bo
     else:
         item.uploadPoster(url=poster_url)
     item.lockPoster()
-    # Record the key of the poster now in effect (read back after setting) so a
-    # later run recognizes it; falls back to the URL if we can't read it.
+    # Record both the resulting selected key and the intended URL so a later run
+    # recognizes the poster (ownership) and whether it matches the rules (wanted).
     try:
         item.reload()
     except Exception:  # pragma: no cover - defensive
         pass
     resulting = _selected_poster_key(item) or poster_url
     state.record(item, _FIELD_POSTER, resulting)
+    state.record(item, _FIELD_POSTER_URL, poster_url)
     return True
 
 

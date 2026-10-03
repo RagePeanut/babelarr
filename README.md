@@ -341,10 +341,12 @@ runs it compares to tell *its own* value apart from one **you** set by hand:
 * **Titles** fingerprint the title *string*. So Babelarr recognizes its own
   title (and won't rewrite it needlessly), and if you change `TITLE_RULES` the
   new title *does* get applied.
-* **Posters** fingerprint the *selected poster's key* (the TMDB URL when the
-  poster was selected from candidates, else the upload id). Babelarr recognizes
-  the poster actually in effect — so it won't re-upload every sweep, re-applies
-  on a rule change, and can tell its own poster from one you swapped in.
+* **Posters** record two things: the *selected poster's key* (what's actually in
+  effect — the TMDB URL when selected from candidates, else the upload id) and
+  the *intended source URL*. Together these let Babelarr recognize the poster in
+  effect — so it won't re-upload/re-select every sweep (uploaded posters
+  included), re-applies when a rule now wants a different poster, and leaves a
+  poster you swapped in by hand alone.
 
 A locked field whose fingerprint doesn't match (you edited/swapped it, or
 Babelarr never set it) is treated as **user-owned**.
