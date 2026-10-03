@@ -48,13 +48,15 @@ def main() -> int:
 
     log.info(
         "Babelarr starting (mode=%s, sweep=%dm, dry_run=%s, max_channels=%s, "
-        "skip_user_locked=%s, state=%s)",
+        "skip_user_locked=%s, state=%s, plex_timeout=%ds, plex_retries=%d)",
         config.new_media_mode,
         config.sweep_interval_minutes,
         config.dry_run,
         config.max_audio_channels,
         ",".join(sorted(config.skip_user_locked)) or "none",
         config.state_persistence or "n/a (no poster/title rules)",
+        config.plex_timeout,
+        config.plex_retries,
     )
     for name, rs in (
         ("audio", config.audio_rules),
@@ -65,7 +67,7 @@ def main() -> int:
         if rs.is_empty():
             log.info("No %s rules configured; that concern will be left untouched", name)
 
-    server = connect(config.plex_url, config.plex_token)
+    server = connect(config.plex_url, config.plex_token, timeout=config.plex_timeout)
     tmdb = TMDBClient(config.tmdb_api_key)
     processor = Processor(config, server, tmdb)
 

@@ -32,10 +32,10 @@ _TVDB_RE = re.compile(r"tvdb://(\d+)")
 _OV_LABEL_PREFIX = "babelarr-ov:"
 
 
-def connect(url: str, token: str):
+def connect(url: str, token: str, timeout: int = 120):
     from plexapi.server import PlexServer  # lazy: keeps this module importable
 
-    return PlexServer(url, token)
+    return PlexServer(url, token, timeout=timeout)
 
 
 def _guids(item) -> List[str]:
@@ -155,6 +155,18 @@ def content_language_for(item, tmdb: "TMDBClient", is_movie: bool) -> Optional[s
 
 # -- audio/subtitle stream views ---------------------------------------------
 
+def _is_active(s) -> bool:
+    """Whether a stream is the one currently in effect.
+
+    Plex exposes ``selected`` (the active stream) and ``default`` (the file's
+    default flag); prefer ``selected`` and fall back to ``default``.
+    """
+    sel = getattr(s, "selected", None)
+    if sel is not None:
+        return bool(sel)
+    return bool(getattr(s, "default", False))
+
+
 def _audio_views(part) -> List[AudioStreamView]:
     views = []
     for s in part.audioStreams():
@@ -164,7 +176,7 @@ def _audio_views(part) -> List[AudioStreamView]:
                 language_code=getattr(s, "languageCode", None) or getattr(s, "language", None),
                 channels=int(getattr(s, "audioChannels", 0) or 0),
                 codec=getattr(s, "codec", None),
-                is_default=bool(getattr(s, "default", False)),
+                is_default=_is_active(s),
             )
         )
     return views
@@ -177,7 +189,7 @@ def _subtitle_views(part) -> List[SubtitleStreamView]:
             SubtitleStreamView(
                 id=s.id,
                 language_code=getattr(s, "languageCode", None) or getattr(s, "language", None),
-                is_default=bool(getattr(s, "default", False)),
+                is_default=_is_active(s),
                 forced=bool(getattr(s, "forced", False)),
             )
         )
@@ -190,33 +202,39 @@ def apply_selection(part, selection: Selection, dry_run: bool) -> bool:
 
     if selection.audio_stream_id is not None:
         current = next(
-            (s.id for s in part.audioStreams() if getattr(s, "default", False)), None
+            (s.id for s in part.audioStreams() if getattr(s, "selected", None)
+             or getattr(s, "default", False)),
+            None,
         )
         if current != selection.audio_stream_id:
             log.info("  audio -> stream %s%s", selection.audio_stream_id,
                      " (dry-run)" if dry_run else "")
             if not dry_run:
-                part.setDefaultAudioStream(selection.audio_stream_id)
+                part.setSelectedAudioStream(selection.audio_stream_id)
             changed = True
 
     if selection.disable_subtitles:
         current = next(
-            (s.id for s in part.subtitleStreams() if getattr(s, "default", False)), None
+            (s.id for s in part.subtitleStreams() if getattr(s, "selected", None)
+             or getattr(s, "default", False)),
+            None,
         )
         if current is not None:
             log.info("  subtitles -> OFF%s", " (dry-run)" if dry_run else "")
             if not dry_run:
-                part.resetDefaultSubtitleStream()
+                part.resetSelectedSubtitleStream()
             changed = True
     elif selection.subtitle_stream_id is not None:
         current = next(
-            (s.id for s in part.subtitleStreams() if getattr(s, "default", False)), None
+            (s.id for s in part.subtitleStreams() if getattr(s, "selected", None)
+             or getattr(s, "default", False)),
+            None,
         )
         if current != selection.subtitle_stream_id:
             log.info("  subtitles -> stream %s%s", selection.subtitle_stream_id,
                      " (dry-run)" if dry_run else "")
             if not dry_run:
-                part.setDefaultSubtitleStream(selection.subtitle_stream_id)
+                part.setSelectedSubtitleStream(selection.subtitle_stream_id)
             changed = True
 
     return changed

@@ -17,9 +17,9 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections import defaultdict
-
-from plexapi.server import PlexServer
+from typing import TYPE_CHECKING
 
 from .config import Config
 from .plex_client import (
@@ -38,9 +38,35 @@ from .poster_selector import select_poster
 from .selector import select_for_part
 from .state import StatePersistence, build_state
 from .title_selector import select_title
-from .tmdb import TMDBClient
+
+if TYPE_CHECKING:  # heavy deps (plexapi/requests) only needed for type hints
+    from plexapi.server import PlexServer
+    from .tmdb import TMDBClient
 
 log = logging.getLogger("babelarr.processor")
+
+
+def _with_retry(fn, attempts: int, what: str):
+    """Call ``fn`` with up to ``attempts`` tries and exponential backoff.
+
+    Returns ``fn()``'s result. Re-raises the last exception if every attempt
+    fails. Used for the big Plex enumeration calls that can transiently time
+    out on a busy server.
+    """
+    last_exc = None
+    for i in range(1, max(1, attempts) + 1):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 - transient Plex/network errors
+            last_exc = exc
+            if i < attempts:
+                backoff = min(30, 2 ** (i - 1))  # 1s, 2s, 4s, ... capped at 30s
+                log.warning("%s failed (attempt %d/%d): %s; retrying in %ds",
+                            what, i, attempts, exc, backoff)
+                time.sleep(backoff)
+            else:
+                log.error("%s failed after %d attempts: %s", what, attempts, exc)
+    raise last_exc
 
 
 class Processor:
@@ -97,9 +123,21 @@ class Processor:
             self._process_poster_and_title(show, production, is_movie=False)
         # Tracks use CONTENT language, resolved PER EPISODE (available audio
         # tracks differ per file). Episodes inherit the series' TMDB metadata.
-        for episode in show.episodes():
-            with self._lock_for(episode.ratingKey):
-                self.process_episode(episode, show=show)
+        try:
+            episodes = _with_retry(
+                show.episodes, self._retries(),
+                f"listing episodes of {show.title!r}",
+            )
+        except Exception:
+            log.exception("Could not list episodes of %s; skipping its tracks",
+                          show.title)
+            return
+        for episode in episodes:
+            try:
+                with self._lock_for(episode.ratingKey):
+                    self.process_episode(episode, show=show)
+            except Exception:
+                log.exception("Skipping episode %s", getattr(episode, "title", "?"))
 
     def process_episode(self, episode, show=None) -> None:
         series = show if show is not None else episode.show()
@@ -160,35 +198,84 @@ class Processor:
 
     # -- sweeps --------------------------------------------------------------
 
+    def _retries(self) -> int:
+        return getattr(self.config, "plex_retries", 3)
+
     def full_sweep(self) -> None:
         log.info("Starting full library sweep")
-        for sec in self._target_sections():
+        processed = skipped = 0
+        try:
+            sections = _with_retry(
+                self._target_sections, self._retries(), "listing library sections"
+            )
+        except Exception:
+            log.exception("Could not list library sections; aborting this sweep")
+            return
+
+        for sec in sections:
             log.info("Sweeping section: %s (%s)", sec.title, sec.type)
-            if sec.type == _MOVIE:
-                for movie in sec.all():
-                    self.process_movie(movie)
-            elif sec.type == _SHOW:
-                for show in sec.all():
-                    self.process_show(show)
+            try:
+                items = _with_retry(
+                    sec.all, self._retries(), f"enumerating section {sec.title!r}"
+                )
+            except Exception:
+                # One section failing (e.g. timeout) must not abort the others.
+                log.exception("Skipping section %s after repeated failures",
+                              sec.title)
+                continue
+
+            for item in items:
+                try:
+                    if sec.type == _MOVIE:
+                        self.process_movie(item)
+                    elif sec.type == _SHOW:
+                        self.process_show(item)
+                    processed += 1
+                except Exception:
+                    # One bad item must not abort the sweep.
+                    skipped += 1
+                    log.exception("Skipping %s", getattr(item, "title", "?"))
+
         self.state.flush()
-        log.info("Full sweep complete")
+        log.info("Full sweep complete (processed=%d, skipped=%d)", processed, skipped)
 
     def recent_sweep(self, limit: int = 50) -> None:
         log.info("Polling recently added items")
-        for sec in self._target_sections():
+        processed = skipped = 0
+        try:
+            sections = _with_retry(
+                self._target_sections, self._retries(), "listing library sections"
+            )
+        except Exception:
+            log.exception("Could not list library sections; skipping this poll")
+            return
+
+        for sec in sections:
             try:
-                recent = sec.recentlyAdded(maxresults=limit)
-            except TypeError:
-                recent = sec.recentlyAdded()
+                try:
+                    recent = sec.recentlyAdded(maxresults=limit)
+                except TypeError:
+                    recent = sec.recentlyAdded()
+            except Exception:
+                log.exception("Could not fetch recently-added for %s", sec.title)
+                continue
+
             for item in recent:
-                if sec.type == _MOVIE:
-                    self.process_movie(item)
-                elif sec.type == _SHOW:
-                    if item.type == "episode":
-                        self.process_episode(item)
-                    elif item.type == "show":
-                        self.process_show(item)
+                try:
+                    if sec.type == _MOVIE:
+                        self.process_movie(item)
+                    elif sec.type == _SHOW:
+                        if item.type == "episode":
+                            self.process_episode(item)
+                        elif item.type == "show":
+                            self.process_show(item)
+                    processed += 1
+                except Exception:
+                    skipped += 1
+                    log.exception("Skipping %s", getattr(item, "title", "?"))
+
         self.state.flush()
+        log.info("Recent poll complete (processed=%d, skipped=%d)", processed, skipped)
 
     def process_rating_key(self, rating_key) -> None:
         """Process a single item by ratingKey (webhook handler)."""
