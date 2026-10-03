@@ -105,6 +105,29 @@ def test_label_none_value_not_ours():
     assert not st.is_ours(item, "title", None)
 
 
+def test_label_is_ours_when_plex_recased_label():
+    # Plex title-cases stored labels: babelarr-locked:... -> Babelarr-locked:...
+    # The real-world 3% bug. Must still be recognized as ours.
+    st = LabelState()
+    stored = label_for("title", "3%")           # babelarr-locked:title:d1e1d77e
+    recased = stored[0].upper() + stored[1:]     # Babelarr-locked:title:d1e1d77e
+    item = FakeItem(labels=[recased])
+    assert st.is_ours(item, "title", "3%")
+
+
+def test_label_record_does_not_duplicate_recased_label():
+    # If Plex already stored a title-cased copy, record() must NOT add a second
+    # (lowercase) duplicate for the same value.
+    st = LabelState()
+    stored = label_for("thumb", "poster-key")
+    recased = stored[0].upper() + stored[1:]
+    item = FakeItem(labels=[recased])
+    st.record(item, "thumb", "poster-key")
+    matches = [t for t in item._labels
+               if t.lower().startswith("babelarr-locked:thumb:")]
+    assert len(matches) == 1  # the pre-existing recased one, no lowercase dup
+
+
 # --- file backend -----------------------------------------------------------
 
 def test_file_is_ours_roundtrip(tmp_path):

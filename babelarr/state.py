@@ -86,20 +86,29 @@ class LabelState:
     def is_ours(self, item, field: str, current_value: Optional[str]) -> bool:
         if current_value is None:
             return False
-        want = label_for(field, current_value)
-        return want in _item_label_tags(item)
+        # Plex may re-case stored labels (it title-cases them, e.g.
+        # "babelarr-locked:title:..." -> "Babelarr-locked:title:..."), so
+        # compare case-insensitively.
+        want = label_for(field, current_value).lower()
+        return any(t.lower() == want for t in _item_label_tags(item) if t)
 
     def record(self, item, field: str, value: str) -> None:
         new_label = label_for(field, value)
-        prefix = label_prefix_for(field)
+        new_lc = new_label.lower()
+        prefix_lc = label_prefix_for(field).lower()
         existing = [t for t in _item_label_tags(item) if t]
-        stale = [t for t in existing if t.startswith(prefix) and t != new_label]
+        # Case-insensitive matching against what Plex actually stored.
+        already_present = any(t.lower() == new_lc for t in existing)
+        stale = [
+            t for t in existing
+            if t.lower().startswith(prefix_lc) and t.lower() != new_lc
+        ]
         if self.dry_run:
             return
         # Self-heal: drop any prior/duplicate lock labels for this field, keep one.
         if stale:
             item.removeLabel(stale, locked=False)
-        if new_label not in existing:
+        if not already_present:
             item.addLabel([new_label], locked=False)
 
     def flush(self) -> None:  # nothing buffered
