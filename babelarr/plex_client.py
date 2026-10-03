@@ -13,6 +13,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Iterable, List, Optional
 
+from .langresolve import resolve_content_language
 from .selector import AudioStreamView, SubtitleStreamView, Selection
 
 if TYPE_CHECKING:  # import only for type hints; avoids a hard requests dependency
@@ -26,6 +27,9 @@ _SHOW = "show"
 _TMDB_RE = re.compile(r"tmdb://(\d+)")
 _IMDB_RE = re.compile(r"imdb://(tt\d+)")
 _TVDB_RE = re.compile(r"tvdb://(\d+)")
+
+# Manual content-language override label, e.g. "babelarr-ov:ja".
+_OV_LABEL_PREFIX = "babelarr-ov:"
 
 
 def connect(url: str, token: str):
@@ -83,8 +87,12 @@ def resolve_tmdb_id(item, tmdb: TMDBClient, is_movie: bool) -> Optional[int]:
     return None
 
 
-def original_language_for(item, tmdb: TMDBClient, is_movie: bool) -> Optional[str]:
-    """Resolve a Plex item's original language via TMDB."""
+def production_language_for(item, tmdb: "TMDBClient", is_movie: bool) -> Optional[str]:
+    """Resolve a Plex item's PRODUCTION language (TMDB original_language).
+
+    This drives posters and titles ("the original poster/title"). It is NOT
+    necessarily the spoken language -- see ``content_language_for``.
+    """
     tmdb_id = resolve_tmdb_id(item, tmdb, is_movie)
     if tmdb_id is not None:
         lang = (
@@ -95,6 +103,54 @@ def original_language_for(item, tmdb: TMDBClient, is_movie: bool) -> Optional[st
         if lang:
             return lang
     return None
+
+
+# Backwards-compatible alias (old name referred to production language).
+original_language_for = production_language_for
+
+
+def ov_override_for(item) -> Optional[str]:
+    """Return the content-language override from a ``babelarr-ov:<lang>`` label."""
+    for tag in getattr(item, "labels", []) or []:
+        name = getattr(tag, "tag", None)
+        if name and name.startswith(_OV_LABEL_PREFIX):
+            value = name[len(_OV_LABEL_PREFIX):].strip()
+            if value:
+                return value
+    return None
+
+
+def _available_audio_languages(item) -> List[Optional[str]]:
+    """Collect the languages of all audio tracks across an item's parts."""
+    langs: List[Optional[str]] = []
+    for media in getattr(item, "media", []) or []:
+        for part in getattr(media, "parts", []) or []:
+            for s in part.audioStreams():
+                langs.append(
+                    getattr(s, "languageCode", None) or getattr(s, "language", None)
+                )
+    return langs
+
+
+def content_language_for(item, tmdb: "TMDBClient", is_movie: bool) -> Optional[str]:
+    """Resolve a Plex item's CONTENT language (what it's spoken in).
+
+    Drives audio and subtitles. Resolution: a ``babelarr-ov:<lang>`` label
+    override, else TMDB ``spoken_languages`` (with the file's available audio
+    tracks as a tiebreaker), falling back to the production language. See
+    ``langresolve.resolve_content_language``.
+    """
+    override = ov_override_for(item)
+    tmdb_id = resolve_tmdb_id(item, tmdb, is_movie)
+    production, spoken = (None, ())
+    if tmdb_id is not None:
+        production, spoken = tmdb.language_info(tmdb_id, is_movie)
+    return resolve_content_language(
+        production_language=production,
+        spoken_languages=spoken,
+        available_audio_languages=_available_audio_languages(item),
+        override=override,
+    )
 
 
 # -- audio/subtitle stream views ---------------------------------------------

@@ -8,18 +8,24 @@
 # specific key (a language, or a leaf script class like `kana`) MUST appear
 # BEFORE a broader one (`cjk`, `default`) or Babelarr refuses to start.
 #
-# Keys match a title's ORIGINAL language and may be: a language code (any ISO
-# 639 form), a script class (cjk / han / kana / hangul / latin / cyrillic /
-# greek / arabic / hebrew / devanagari / thai / ...), or `default` (must be
-# last). Values are ordered preference lists; the first AVAILABLE one wins.
+# Keys match a title's language and may be: a language code (any ISO 639 form),
+# a script class (cjk / han / kana / hangul / latin / cyrillic / greek / arabic
+# / hebrew / devanagari / thai / ...), or `default` (must be last). Values are
+# ordered preference lists; the first AVAILABLE one wins.
 #
-# Reserved tokens per concern:
-#   audio      -> original            (the original-language track)
+# IMPORTANT -- two languages: audio & subtitles are keyed on the CONTENT
+# language (what the title is spoken in, from TMDB spoken_languages); poster &
+# title are keyed on the PRODUCTION language (TMDB original_language). They can
+# differ (e.g. Uzumaki: content=ja, production=en). Add a `babelarr-ov:<lang>`
+# label on an item to override its content language.
+#
+# Reserved tokens per concern (`original` follows the key language above):
+#   audio      -> original            (the content-language track)
 #   subtitles  -> off                 (force subtitles OFF)
-#   poster     -> original | textless (original-language poster; or TMDB "no
+#   poster     -> original | textless (production-language poster; or TMDB "no
 #                                       language" poster -- NOT guaranteed
 #                                       text-free, community-categorized)
-#   title      -> original            (TMDB original title)
+#   title      -> original            (TMDB original/production-language title)
 #
 # NOTE on precedence: setting the matching *_RULES environment variable
 # (AUDIO_RULES / SUBTITLES_RULES / POSTER_RULES / TITLE_RULES) OVERRIDES that
