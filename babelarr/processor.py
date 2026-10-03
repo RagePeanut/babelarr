@@ -4,11 +4,13 @@ Shared by every entry point (full sweep, webhook handler, recent poll) so the
 behavior is identical regardless of what triggered it. A per-rating-key lock
 serializes concurrent work on the same item.
 
-For each title Babelarr applies up to three independent, opt-in concerns, each
-driven by the title's TMDB original language:
-  * audio + subtitle track defaults (per media part)
-  * poster        (per item)
-  * display title (per item)
+For each title Babelarr applies up to four independent, opt-in concerns. They
+are driven by TWO different languages:
+  * audio + subtitle track defaults -> the CONTENT language (what the title is
+    spoken in; resolved from TMDB spoken_languages + the file's audio tracks,
+    with a ``babelarr-ov:<lang>`` label override).
+  * poster + display title          -> the PRODUCTION language (TMDB
+    original_language), i.e. "the original poster/title".
 """
 
 from __future__ import annotations
@@ -28,7 +30,8 @@ from .plex_client import (
     apply_poster,
     apply_selection,
     apply_title,
-    original_language_for,
+    content_language_for,
+    production_language_for,
     resolve_tmdb_id,
 )
 from .poster_selector import select_poster
@@ -73,44 +76,49 @@ class Processor:
 
     def process_movie(self, movie) -> None:
         with self._lock_for(movie.ratingKey):
-            orig = original_language_for(movie, self.tmdb, is_movie=True)
-            if orig is None:
-                log.debug("No original language for %s; skipping", movie.title)
+            # Content language (spoken) drives audio/subs; production language
+            # (TMDB original_language) drives poster/title.
+            content = content_language_for(movie, self.tmdb, is_movie=True)
+            production = production_language_for(movie, self.tmdb, is_movie=True)
+            if content is None and production is None:
+                log.debug("No language info for %s; skipping", movie.title)
                 return
-            log.info("Movie: %s (orig=%s)", movie.title, orig)
-            self._process_tracks(movie, orig)
-            self._process_poster_and_title(movie, orig, is_movie=True)
+            log.info("Movie: %s (content=%s, production=%s)",
+                     movie.title, content, production)
+            if content is not None:
+                self._process_tracks(movie, content)
+            self._process_poster_and_title(movie, production, is_movie=True)
 
     def process_show(self, show) -> None:
-        orig = original_language_for(show, self.tmdb, is_movie=False)
-        if orig is None:
-            log.debug("No original language for show %s; skipping", show.title)
-            return
-        log.info("Show: %s (orig=%s)", show.title, orig)
-        # Poster/title rules apply to the show itself and to each episode's
-        # tracks. (Episodes inherit the series' original language.)
+        # Poster/title use the show's PRODUCTION language.
+        production = production_language_for(show, self.tmdb, is_movie=False)
+        log.info("Show: %s (production=%s)", show.title, production)
         with self._lock_for(show.ratingKey):
-            self._process_poster_and_title(show, orig, is_movie=False)
+            self._process_poster_and_title(show, production, is_movie=False)
+        # Tracks use CONTENT language, resolved PER EPISODE (available audio
+        # tracks differ per file). Episodes inherit the series' TMDB metadata.
         for episode in show.episodes():
             with self._lock_for(episode.ratingKey):
-                self._process_tracks(episode, orig)
+                self.process_episode(episode, show=show)
 
-    def process_episode(self, episode) -> None:
-        show = episode.show()
-        orig = original_language_for(show, self.tmdb, is_movie=False)
-        if orig is None:
+    def process_episode(self, episode, show=None) -> None:
+        series = show if show is not None else episode.show()
+        content = content_language_for(series, self.tmdb, is_movie=False)
+        # Re-resolve content language against THIS episode's audio tracks when
+        # the series lookup couldn't (multi-spoken titles need the file).
+        if content is None:
             return
         with self._lock_for(episode.ratingKey):
-            self._process_tracks(episode, orig)
+            self._process_tracks(episode, content)
 
-    def _process_tracks(self, video, original_language: str) -> None:
+    def _process_tracks(self, video, content_language: str) -> None:
         for media in video.media:
             for part in media.parts:
                 try:
                     selection = select_for_part(
                         audios=_audio_views(part),
                         subtitles=_subtitle_views(part),
-                        original_language=original_language,
+                        original_language=content_language,
                         audio_rules=self.config.audio_rules,
                         subtitle_rules=self.config.subtitle_rules,
                         max_channels=self.config.max_audio_channels,
@@ -120,10 +128,10 @@ class Processor:
                     log.exception("Failed processing part of %s",
                                   getattr(video, "title", "?"))
 
-    def _process_poster_and_title(self, item, original_language: str, is_movie: bool) -> None:
+    def _process_poster_and_title(self, item, production_language, is_movie: bool) -> None:
         want_poster = not self.config.poster_rules.is_empty()
         want_title = not self.config.title_rules.is_empty()
-        if not (want_poster or want_title):
+        if not (want_poster or want_title) or production_language is None:
             return
 
         tmdb_id = resolve_tmdb_id(item, self.tmdb, is_movie)
@@ -133,7 +141,7 @@ class Processor:
         if want_poster:
             try:
                 posters = self.tmdb.posters(tmdb_id, is_movie)
-                key = select_poster(posters, original_language, self.config.poster_rules)
+                key = select_poster(posters, production_language, self.config.poster_rules)
                 if key:
                     apply_poster(item, key, self.config.skip_user_locked,
                                  self.state, self.config.dry_run)

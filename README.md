@@ -3,8 +3,8 @@
 **Make Plex speak your languages.**
 
 Plex isn't built for polyglots — Babelarr fixes that. For every movie and show,
-it looks up the title's **original language** from TMDB and, driven by four
-independent sets of per-language rules, can:
+it works out the title's language from TMDB and, driven by four independent sets
+of per-language rules, can:
 
 1. Set the default **audio** track to a chosen language — your original-language
    ("OV") purists and your native-dub watchers are both first-class.
@@ -40,7 +40,9 @@ rule — not even `default` — once a key has matched.
 key : pref1, pref2, pref3
 ```
 
-* **key** — matched against the title's **original language**. It may be:
+* **key** — matched against the title's language. For audio/subtitles that's
+  the **content language**; for posters/titles it's the **production language**
+  (see [Two languages](#two-languages-content-vs-production)). It may be:
   * a concrete language code (`fre`, `ja`, `de`, …), any ISO 639 form;
   * a **script class** (see below) — `cjk`, `kana`, `cyrillic`, …;
   * `default` — matches anything. **Only valid as the last entry.**
@@ -66,9 +68,15 @@ These are the only reserved values, and they are **values only** — never keys.
 
 | Token | Audio | Subtitles | Posters | Titles |
 |-------|-------|-----------|---------|--------|
-| `original` | the original-language audio track | — | the original-language poster | TMDB **original title** |
+| `original` | the **content**-language audio track | — | the **production**-language poster | the **production**-language (TMDB original) title |
 | `off` | — | force subtitles **OFF** (distinct from "untouched") | — | — |
 | `textless` | — | — | TMDB **"no language"** poster¹ | — |
+
+> **`original` means two different things** depending on the concern, because
+> Babelarr distinguishes a title's **content language** (what it's actually
+> spoken in) from its **production language** (TMDB `original_language`). Audio
+> `original` → the content language; poster/title `original` → the production
+> language. See [Two languages: content vs. production](#two-languages-content-vs-production).
 
 Notes on the gaps:
 * **Audio** has no `off` — a video always plays *some* audio, so audio is never
@@ -84,9 +92,9 @@ happens. Treat it as best-effort.
 
 ### Script classes
 
-Keys can match the **writing system** of the original language, so you can make
-coarse decisions without listing every language. `cjk` is an umbrella over three
-leaves:
+Keys can match the **writing system** of the title's language (content or
+production, depending on the concern), so you can make coarse decisions without
+listing every language. `cjk` is an umbrella over three leaves:
 
 ```
 cjk ─┬─ han     (Chinese)
@@ -189,16 +197,74 @@ Babelarr does nothing without rules, so this is almost always a misconfiguration
 
 ---
 
+## Two languages: content vs. production
+
+TMDB exposes **two** notions of a title's language, and they are **not always
+the same**:
+
+* **Production language** — TMDB's `original_language`. It reflects the
+  **origin/production** of the title (origin country, producing studio), **not
+  necessarily what it's spoken in**. For example the anime *Uzumaki* has
+  `original_language = en` because it was an Adult Swim production — even though
+  it's spoken in Japanese.
+* **Content language** — what the title is actually **spoken in**, derived from
+  TMDB's `spoken_languages`.
+
+Babelarr deliberately uses the **right one for each concern**:
+
+| Concern | Language used | Why |
+|---------|---------------|-----|
+| **audio**, **subtitles** | **content** language | you want the track in the language the title is actually spoken in |
+| **poster**, **title** | **production** language | "the original poster/title" conventionally means the *production* one (e.g. *Uzumaki*'s official English title/poster) |
+
+So for *Uzumaki* with `AUDIO_RULES=default:original`, `SUBTITLES_RULES=...`,
+`POSTER_RULES=default:original`, `TITLE_RULES=default:original` you get
+**Japanese audio + subtitles** (content) but the **English title and poster**
+(production) — which is almost certainly what you want.
+
+### How the content language is resolved
+
+For audio/subtitles, Babelarr determines the content language in this order:
+
+1. **Manual override** — a `babelarr-ov:<lang>` **label** on the item (see
+   below) wins outright.
+2. **Exactly one** spoken language on TMDB → use it.
+3. **Multiple** spoken, and the **first** equals the production language → use
+   the first spoken.
+4. **Multiple** spoken, first ≠ production → walk the spoken list in order and
+   use the first language the **file actually has an audio track for**.
+5. **Multiple** spoken but none of them are available as audio → the first
+   spoken language.
+6. **No** spoken languages at all → fall back to the production language.
+
+### Manual override — the `babelarr-ov:<lang>` label
+
+When TMDB's data is odd (locked, mis-tagged, an unusual co-production), add a
+Plex **label** `babelarr-ov:<lang>` to the movie or show to force its **content
+language** (audio/subtitles only — posters/titles still use the production
+language). `<lang>` accepts any ISO 639 form (`ja` / `jpn`, `fr` / `fre` /
+`fra`). Applied to a show, it is inherited by all episodes.
+
+```
+# Force Uzumaki's content language to Japanese regardless of TMDB:
+babelarr-ov:ja
+```
+
+> This label is **not** one of the `babelarr-locked:*` state labels; it's a
+> manual input you add yourself.
+
+---
+
 ## How each concern decides
 
 ### Audio — `AUDIO_RULES`
 
-Keyed by the title's **original language**. Preferences are audio languages;
-`original` resolves to the title's original language. For the chosen language,
-Babelarr picks the track with the **most channels** that does not exceed
-`MAX_AUDIO_CHANNELS` (if set), with codec quality breaking ties. Misses (no
-matching rule, or no track in any preferred language) leave the current Plex
-audio default as-is.
+Keyed by the title's **content language** (what it's spoken in — see above).
+Preferences are audio languages; `original` resolves to that content language.
+For the chosen language, Babelarr picks the track with the **most channels**
+that does not exceed `MAX_AUDIO_CHANNELS` (if set), with codec quality breaking
+ties. Misses (no matching rule, or no track in any preferred language) leave the
+current Plex audio default as-is.
 
 Common presets:
 
@@ -217,23 +283,24 @@ AUDIO_RULES=jpn:jpn;default:eng
 
 Keyed by the **audio language that will actually play** — i.e. the track
 `AUDIO_RULES` selected. If audio was left untouched, the language of Plex's
-*current* default audio track is used (falling back to the original language
-only when no default is marked). This means a native dub automatically gets the
-subtitle rule for the dub's language, not the original's. First available
-preference wins; `off` forces subtitles off. Misses leave subtitles untouched.
+*current* default audio track is used (falling back to the content language only
+when no default is marked). This means a native dub automatically gets the
+subtitle rule for the dub's language. First available preference wins; `off`
+forces subtitles off. Misses leave subtitles untouched.
 
 ### Posters — `POSTER_RULES`
 
-Keyed by the title's **original language**. Preferences are poster languages;
-`original` resolves to the title's original language and `textless` matches
-TMDB's no-language posters. Among candidates for a given preference, the
-highest-voted poster on TMDB is chosen.
+Keyed by the title's **production language** (TMDB `original_language`).
+Preferences are poster languages; `original` resolves to that production
+language and `textless` matches TMDB's no-language posters. Among candidates for
+a given preference, the highest-voted poster on TMDB is chosen.
 
 ### Titles — `TITLE_RULES`
 
-Keyed by the title's **original language**. Preferences are title languages;
-`original` resolves to TMDB's original title. When Babelarr sets a title it also
-**locks** the Plex title field so the agent won't revert it on the next refresh.
+Keyed by the title's **production language** (TMDB `original_language`).
+Preferences are title languages; `original` resolves to TMDB's original title
+(the production-language title). When Babelarr sets a title it also **locks** the
+Plex title field so the agent won't revert it on the next refresh.
 
 ### Protecting hand-picked artwork/titles — `SKIP_USER_LOCKED` + state
 
@@ -383,10 +450,12 @@ in `tests/`.
 * **Default track selection is library-wide**, not per-Plex-user. Plex stores
   the default audio/subtitle stream on the media part, so these choices apply to
   everyone who plays the item.
-* **TV**: a series' original language (from TMDB) is applied to all of its
-  episodes; poster/title rules apply to the series item.
-* Original language, posters, and titles come from TMDB via the item's
+* **TV**: a series' production language (from TMDB) drives its poster/title. The
+  content language for audio/subtitles is resolved **per episode** (using each
+  episode file's own audio tracks), inheriting the series' TMDB metadata.
+* Language metadata, posters, and titles come from TMDB via the item's
   `tmdb://` guid (falling back to `imdb://` / `tvdb://` lookups). Titles Plex
-  hasn't matched to a provider are skipped.
+  hasn't matched to a provider are skipped (unless a `babelarr-ov:` label
+  supplies the content language).
 * `textless` posters are only as accurate as TMDB's community categorization
   (see above).

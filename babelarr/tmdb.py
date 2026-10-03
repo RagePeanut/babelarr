@@ -39,7 +39,14 @@ class TMDBClient:
             log.warning("TMDB request failed for %s: %s", path, exc)
             return None
 
-    # -- original language ---------------------------------------------------
+    # -- language metadata ---------------------------------------------------
+    #
+    # TMDB distinguishes two notions that Babelarr keeps separate:
+    #   * original_language -- the PRODUCTION language (tied to origin country),
+    #     NOT necessarily the language the content is spoken in. Used for
+    #     posters/titles ("the original poster/title").
+    #   * spoken_languages  -- the languages actually spoken in the content.
+    #     Used (with the resolver in plex_client) to drive audio/subtitles.
 
     @lru_cache(maxsize=4096)
     def movie_original_language(self, tmdb_id: int) -> Optional[str]:
@@ -50,6 +57,24 @@ class TMDBClient:
     def tv_original_language(self, tmdb_id: int) -> Optional[str]:
         data = self._get(f"/tv/{tmdb_id}")
         return data.get("original_language") if data else None
+
+    @lru_cache(maxsize=4096)
+    def language_info(self, tmdb_id: int, is_movie: bool) -> tuple:
+        """Return ``(production_language, spoken_languages)`` for a title.
+
+        ``production_language`` is TMDB's ``original_language`` (may be None).
+        ``spoken_languages`` is an ordered tuple of ISO 639-1 codes from TMDB's
+        ``spoken_languages`` list (possibly empty).
+        """
+        kind = "movie" if is_movie else "tv"
+        data = self._get(f"/{kind}/{tmdb_id}") or {}
+        production = data.get("original_language")
+        spoken = tuple(
+            s.get("iso_639_1")
+            for s in (data.get("spoken_languages") or [])
+            if s.get("iso_639_1")
+        )
+        return production, spoken
 
     @lru_cache(maxsize=4096)
     def find_by_external_id(self, external_id: str, source: str) -> Optional[dict]:
