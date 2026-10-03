@@ -69,6 +69,23 @@ def _with_retry(fn, attempts: int, what: str):
     raise last_exc
 
 
+def _has_any_stream(video) -> bool:
+    """True if any media part already exposes audio/subtitle streams.
+
+    Episodes from show.episodes() have Part but no Stream children until the
+    item's detail endpoint is loaded; this lets _process_tracks decide whether
+    a reload() is needed, without trusting isFullObject().
+    """
+    try:
+        for media in getattr(video, "media", []) or []:
+            for part in getattr(media, "parts", []) or []:
+                if part.audioStreams() or part.subtitleStreams():
+                    return True
+    except Exception:  # pragma: no cover - defensive
+        return True  # on error, assume present -> don't force a reload loop
+    return False
+
+
 class Processor:
     def __init__(self, config: Config, server: PlexServer, tmdb: TMDBClient,
                  state: StatePersistence = None):
@@ -180,11 +197,13 @@ class Processor:
             self._process_tracks(episode, content)
 
     def _process_tracks(self, video, content_language: str) -> None:
-        # Items from listing calls (notably episodes via show.episodes()) can be
-        # partial -- their media Parts come back WITHOUT Stream children, so
-        # audioStreams()/subtitleStreams() would be empty and nothing would be
-        # applied. Reload to fetch full stream data before inspecting tracks.
-        if not getattr(video, "isFullObject", lambda: True)():
+        # Items from listing calls (notably episodes via show.episodes()) come
+        # back with Media and Part but WITHOUT the <Stream> children, so
+        # audioStreams()/subtitleStreams() are empty and nothing would be
+        # applied. The per-item detail endpoint (fetched by reload()) includes
+        # the streams. We don't rely on isFullObject() being accurate here:
+        # instead, if a part reports no streams, reload once and re-check.
+        if not _has_any_stream(video):
             try:
                 video.reload()
             except Exception:  # pragma: no cover - defensive

@@ -1,8 +1,11 @@
-"""Tests for _process_tracks: partial items (episodes) are reloaded first.
+"""Tests for _process_tracks: episodes with no stream data get reloaded first.
 
-Regression: episodes from show.episodes() come back partial -- their Parts have
-no Stream children -- so without a reload the audio/subtitle lists are empty and
-nothing is applied (the "works for movies, not shows" bug).
+Confirmed from a live server: episodes from show.episodes() have Media + Part
+but NO <Stream> children -- streams only appear on the per-episode detail
+endpoint (fetched by reload()). Without reloading, audioStreams()/
+subtitleStreams() are empty and nothing is applied (the "works for movies, not
+shows" bug). We trigger the reload by detecting a part with no streams, not by
+trusting isFullObject().
 """
 
 import sys
@@ -27,17 +30,20 @@ class FakeStream:
 
 
 class FakePart:
+    """A Part that starts with NO streams; gains them after the item reloads."""
+
     def __init__(self, audio, subs):
-        self._audio = audio
-        self._subs = subs
+        self._audio_full = audio
+        self._subs_full = subs
+        self.has_streams = False  # listing state: empty
         self.selected_audio = None
         self.selected_sub = None
 
     def audioStreams(self):
-        return self._audio
+        return self._audio_full if self.has_streams else []
 
     def subtitleStreams(self):
-        return self._subs
+        return self._subs_full if self.has_streams else []
 
     def setSelectedAudioStream(self, s):
         self.selected_audio = s
@@ -54,24 +60,18 @@ class FakeMedia:
         self.parts = [part]
 
 
-class PartialEpisode:
-    """Starts partial (no media); reload() populates full media/parts."""
-
+class FakeEpisode:
     def __init__(self, part):
         self.title = "Ep1"
         self.ratingKey = "e1"
-        self._full = False
         self._part = part
-        self.media = []  # empty until reloaded
+        self.media = [FakeMedia(part)]
         self.reloaded = 0
 
-    def isFullObject(self):
-        return self._full
-
     def reload(self):
+        # Detail endpoint populates the streams.
         self.reloaded += 1
-        self._full = True
-        self.media = [FakeMedia(self._part)]
+        self._part.has_streams = True
 
 
 def _processor():
@@ -85,30 +85,28 @@ def _processor():
     return p
 
 
-def test_partial_episode_is_reloaded_then_tracks_applied():
-    # Japanese content; file has jpn + eng audio. Expect jpn audio selected,
-    # and 'jpn:off' -> subtitles disabled.
+def test_episode_without_streams_is_reloaded_then_applied():
+    # jpn content; after reload the file exposes jpn+eng audio and a selected
+    # fre subtitle. Expect jpn audio chosen and jpn:off -> subs disabled.
     part = FakePart(
-        audio=[FakeStream(1, "jpn", selected=False),
-               FakeStream(2, "eng", selected=True)],
-        subs=[FakeStream(10, "fre", selected=True)],  # a sub is currently on
+        audio=[FakeStream(1, "jpn"), FakeStream(2, "eng", selected=True)],
+        subs=[FakeStream(10, "fre", selected=True)],
     )
-    ep = PartialEpisode(part)
+    ep = FakeEpisode(part)
     p = _processor()
 
     p._process_tracks(ep, "jpn")
 
-    assert ep.reloaded == 1               # partial -> reloaded
-    assert part.selected_audio == 1       # Japanese audio chosen
-    assert part.selected_sub == 0         # jpn:off -> currently-on sub disabled
+    assert ep.reloaded == 1           # no streams -> reloaded once
+    assert part.selected_audio == 1   # Japanese audio chosen
+    assert part.selected_sub == 0     # jpn:off disabled the on subtitle
 
 
-def test_full_object_not_reloaded():
+def test_episode_with_streams_not_reloaded():
     part = FakePart(audio=[FakeStream(1, "jpn", selected=True)], subs=[])
-    ep = PartialEpisode(part)
-    ep._full = True
-    ep.media = [FakeMedia(part)]  # already populated
+    part.has_streams = True  # already populated (e.g. a movie-like item)
+    ep = FakeEpisode(part)
     p = _processor()
 
     p._process_tracks(ep, "jpn")
-    assert ep.reloaded == 0  # already full -> no reload
+    assert ep.reloaded == 0  # streams already present -> no reload
