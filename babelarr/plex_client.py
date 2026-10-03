@@ -255,49 +255,67 @@ def _user_owns_field(item, field_name: str, current_value, state) -> bool:
     return not state.is_ours(item, field_name, current_value)
 
 
-def _selected_poster_key(item):
-    """The ratingKey of the item's currently-selected poster, or ``None``.
+def _find_existing_poster(item, poster_url):
+    """Return an existing poster candidate matching ``poster_url``, or None.
 
-    For a poster Babelarr uploaded this is a stable ``upload://posters/<hash>``
-    id (hash of the image bytes), persisting across normal scans/refreshes. If
-    the user swaps the poster the selected id changes, letting us tell our own
-    poster from one the user picked.
+    Plex lists TMDB poster candidates with their ``ratingKey``/``key`` equal to
+    the source URL, so a wanted TMDB poster is often already present -- we can
+    select it instead of re-uploading the image.
     """
     try:
-        for p in item.posters():
-            if getattr(p, "selected", False):
-                return getattr(p, "ratingKey", None)
+        candidates = item.posters()
     except Exception:  # pragma: no cover - network/plex variance
-        pass
+        return None
+    for p in candidates or []:
+        if poster_url in (getattr(p, "ratingKey", None), getattr(p, "key", None)):
+            return p
     return None
 
 
 def apply_poster(item, poster_url, skip_user_locked, state, dry_run: bool) -> bool:
-    """Set a poster, then lock it and fingerprint the resulting selection.
+    """Set the poster to ``poster_url``, lock it, and fingerprint the URL.
 
-    Skips only when the poster field is locked AND user-owned (its selected
-    poster's ratingKey doesn't match what Babelarr recorded) AND ``poster`` is
-    in ``skip_user_locked``. Babelarr's own locked posters are re-managed freely.
+    Recognition is based on the **intended TMDB URL** (a stable value from the
+    rules), fingerprinted into state -- NOT the uploaded poster's Plex key,
+    which isn't stable across uploads. Behavior:
+
+    * If the poster field is locked and the recorded fingerprint already equals
+      this URL's fingerprint -> Babelarr already set this exact poster; skip
+      (prevents re-uploading the same image every sweep).
+    * Else if the field is locked but the fingerprint does NOT match, and
+      ``poster`` is in ``skip_user_locked`` -> treat as user-owned; skip. This
+      also preserves a poster the user swapped in (the recorded fingerprint is
+      from a different URL, or absent).
+    * Otherwise: if the wanted URL is already one of the item's existing poster
+      candidates, **select** it (no re-upload); else upload it. Then lock and
+      record ``fingerprint(poster_url)``.
     """
-    if "poster" in skip_user_locked and _user_owns_field(
-        item, _FIELD_POSTER, _selected_poster_key(item), state
-    ):
+    locked = _is_field_locked(item, _FIELD_POSTER)
+    ours = state.is_ours(item, _FIELD_POSTER, poster_url)
+
+    if locked and ours:
+        log.debug("  poster already set by Babelarr, skipping %s",
+                  getattr(item, "title", "?"))
+        return False
+
+    if locked and not ours and "poster" in skip_user_locked:
         log.debug("  poster user-locked, skipping %s", getattr(item, "title", "?"))
         return False
-    log.info("  poster -> %s%s", poster_url, " (dry-run)" if dry_run else "")
+
+    existing = _find_existing_poster(item, poster_url)
+    verb = "select" if existing is not None else "upload"
+    log.info("  poster -> %s (%s)%s", poster_url, verb,
+             " (dry-run)" if dry_run else "")
     if dry_run:
         return True
-    item.uploadPoster(url=poster_url)
+    if existing is not None:
+        # The wanted poster is already a candidate (e.g. a TMDB poster Plex
+        # already knows) -- just select it instead of re-downloading/uploading.
+        item.setPoster(existing)
+    else:
+        item.uploadPoster(url=poster_url)
     item.lockPoster()
-    # P3: read back the now-selected poster's ratingKey and fingerprint THAT, so
-    # a later user swap (which changes the selected poster) is detectable.
-    try:
-        item.reload()
-    except Exception:  # pragma: no cover - defensive
-        pass
-    key = _selected_poster_key(item)
-    if key is not None:
-        state.record(item, _FIELD_POSTER, key)
+    state.record(item, _FIELD_POSTER, poster_url)
     return True
 
 
