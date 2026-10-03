@@ -67,6 +67,9 @@ class StatePersistence(Protocol):
     def record(self, item, field: str, value: str) -> None:
         """Persist that Babelarr wrote ``value`` to ``field`` on ``item``."""
 
+    def clear(self, item, field: str) -> None:
+        """Remove any recorded value for ``field`` on ``item`` (if present)."""
+
     def flush(self) -> None:
         """Persist any buffered state (no-op for label backend)."""
 
@@ -110,6 +113,14 @@ class LabelState:
             item.removeLabel(stale, locked=False)
         if not already_present:
             item.addLabel([new_label], locked=False)
+
+    def clear(self, item, field: str) -> None:
+        prefix_lc = label_prefix_for(field).lower()
+        stale = [t for t in _item_label_tags(item)
+                 if t and t.lower().startswith(prefix_lc)]
+        if self.dry_run or not stale:
+            return
+        item.removeLabel(stale, locked=False)
 
     def flush(self) -> None:  # nothing buffered
         return
@@ -175,6 +186,16 @@ class FileState:
         with self._lock:
             self._data.setdefault(key, {})[field] = fingerprint(value)
             self._dirty = True
+
+    def clear(self, item, field: str) -> None:
+        key = item_guid_key(item)
+        with self._lock:
+            entry = self._data.get(key)
+            if entry and field in entry:
+                del entry[field]
+                if not entry:
+                    self._data.pop(key, None)
+                self._dirty = True
 
     def flush(self) -> None:
         if self.dry_run:

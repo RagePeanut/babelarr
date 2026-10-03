@@ -321,7 +321,9 @@ forces subtitles off. Misses leave subtitles untouched.
 Keyed by the title's **production language** (TMDB `original_language`).
 Preferences are poster languages; `original` resolves to that production
 language and `textless` matches TMDB's no-language posters. Among candidates for
-a given preference, the highest-voted poster on TMDB is chosen.
+a given preference, the highest-voted poster on TMDB is chosen. If that poster
+is already one of the item's poster candidates in Plex, Babelarr **selects** it;
+otherwise it **uploads** it.
 
 ### Titles — `TITLE_RULES`
 
@@ -333,14 +335,23 @@ Plex title field so the agent won't revert it on the next refresh.
 ### Protecting hand-picked artwork/titles — `SKIP_USER_LOCKED` + state
 
 When Babelarr sets a poster or title it **locks** the Plex field (so Plex's
-agent won't revert it) and records a **fingerprint** of the value it wrote. On
-later runs it compares that fingerprint to the field's current value to tell
-*its own* locked value apart from one **you** locked by hand:
+agent won't revert it) and records a **fingerprint** of what it set. On later
+runs it compares to tell *its own* value apart from one **you** set by hand:
 
-* locked field whose value still matches Babelarr's fingerprint → **ours** →
-  Babelarr may update it (e.g. when your rules change);
-* locked field whose value **doesn't** match (you edited/swapped it) or that
-  Babelarr never set → **user-owned**.
+* **Titles** fingerprint the title *string*. So Babelarr recognizes its own
+  title (and won't rewrite it needlessly), and if you change `TITLE_RULES` the
+  new title *does* get applied.
+* **Posters** record the *selected poster's key* (what's actually in effect —
+  the TMDB URL when selected from candidates, else the upload id). For an
+  *uploaded* poster (whose key isn't the URL) Babelarr also records the source
+  URL, so a later rule change is detectable; selected posters need no second
+  value. This lets Babelarr recognize the poster in effect — so it won't
+  re-upload/re-select every sweep (uploaded posters included), re-applies when a
+  rule now wants a different poster, and leaves a poster you swapped in by hand
+  alone.
+
+A locked field whose fingerprint doesn't match (you edited/swapped it, or
+Babelarr never set it) is treated as **user-owned**.
 
 `SKIP_USER_LOCKED` decides what happens to **user-owned** fields:
 
@@ -370,11 +381,16 @@ for audio/subtitle-only setups.
 Both mechanisms fail toward **"don't clobber."** `file` is the usual choice;
 pick `labels` only if you specifically want all state inside Plex.
 
-> Note on posters: Babelarr fingerprints the uploaded poster's resulting
-> identifier, so if you later swap the poster by hand it's detected as yours and
-> protected. If an item is removed/rebuilt or its uploaded images are purged by
-> Plex, the poster field also loses its lock — so Babelarr simply sets it again
-> (it never overwrites a *locked* poster it doesn't recognize).
+> **Posters — selecting vs. uploading.** If the wanted poster is already one of
+> the item's existing poster candidates on TMDB (matched by URL), Babelarr
+> **selects** it rather than re-uploading — no duplicate image, and the chosen
+> poster stays a clean provider entry. Only when the URL isn't among the
+> candidates does it upload.
+>
+> Babelarr records the key of the poster actually in effect, so it recognizes
+> its own poster (no re-upload every sweep), re-applies when you change
+> `POSTER_RULES`, and leaves a poster you swapped in by hand alone (when
+> `poster` is protected by `SKIP_USER_LOCKED`).
 
 ---
 
