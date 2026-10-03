@@ -23,9 +23,39 @@ def base_env(monkeypatch, tmp_path):
     monkeypatch.setenv("TMDB_API_KEY", "key")
     for v in ("AUDIO_RULES", "SUBTITLES_RULES", "POSTER_RULES", "TITLE_RULES",
               "CONFIG_FILE", "STATE_PERSISTENCE", "STATE_FILE",
-              "SKIP_USER_LOCKED"):
+              "SKIP_USER_LOCKED", "PLEX_TIMEOUT", "PLEX_RETRIES"):
         monkeypatch.delenv(v, raising=False)
     return monkeypatch
+
+
+def test_plex_timeout_and_retries_defaults(base_env):
+    base_env.setenv("AUDIO_RULES", "default:original")
+    cfg = Config.from_env()
+    assert cfg.plex_timeout == 120
+    assert cfg.plex_retries == 3
+
+
+def test_plex_timeout_and_retries_override(base_env):
+    base_env.setenv("AUDIO_RULES", "default:original")
+    base_env.setenv("PLEX_TIMEOUT", "300")
+    base_env.setenv("PLEX_RETRIES", "5")
+    cfg = Config.from_env()
+    assert cfg.plex_timeout == 300
+    assert cfg.plex_retries == 5
+
+
+def test_plex_timeout_invalid(base_env):
+    base_env.setenv("AUDIO_RULES", "default:original")
+    base_env.setenv("PLEX_TIMEOUT", "0")
+    with pytest.raises(ConfigError, match="PLEX_TIMEOUT"):
+        Config.from_env()
+
+
+def test_plex_retries_invalid(base_env):
+    base_env.setenv("AUDIO_RULES", "default:original")
+    base_env.setenv("PLEX_RETRIES", "0")
+    with pytest.raises(ConfigError, match="PLEX_RETRIES"):
+        Config.from_env()
 
 
 def test_requires_at_least_one_rule(base_env):

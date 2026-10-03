@@ -210,6 +210,8 @@ class Config:
     skip_user_locked: set  # subset of {"poster", "title"}
     state_persistence: str  # "labels" | "file"
     state_file: str
+    plex_timeout: int  # per-request Plex read timeout (seconds)
+    plex_retries: int  # retry attempts for transient Plex failures
     sweep_interval_minutes: int
     new_media_mode: str  # webhook | polling | disabled
     webhook_port: int
@@ -249,6 +251,13 @@ class Config:
         if max_channels is not None and max_channels < 1:
             raise ConfigError("MAX_AUDIO_CHANNELS must be >= 1 when set")
 
+        plex_timeout = _env_int("PLEX_TIMEOUT", 120)
+        if plex_timeout < 1:
+            raise ConfigError("PLEX_TIMEOUT must be >= 1 (seconds)")
+        plex_retries = _env_int("PLEX_RETRIES", 3)
+        if plex_retries < 1:
+            raise ConfigError("PLEX_RETRIES must be >= 1")
+
         file_sections = _load_config_file()
         rules = _resolve_rules(file_sections)
 
@@ -280,6 +289,8 @@ class Config:
             ),
             state_persistence=state_persistence,
             state_file=os.environ.get("STATE_FILE", "").strip() or DEFAULT_STATE_FILE,
+            plex_timeout=plex_timeout,
+            plex_retries=plex_retries,
             sweep_interval_minutes=_env_int("SWEEP_INTERVAL_MINUTES", 360),
             new_media_mode=mode,
             webhook_port=_env_int("WEBHOOK_PORT", 9999),

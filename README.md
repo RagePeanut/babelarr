@@ -371,6 +371,8 @@ come from a config file and/or `*_RULES` env vars — see
 | `STATE_PERSISTENCE` | — (**required** if poster/title rules used) | How Babelarr remembers its own values: `file` or `labels`. No default. |
 | `STATE_FILE` | `/config/babelarr-state.json` | Path to the JSON state file (only used when `STATE_PERSISTENCE=file`). |
 | `MAX_AUDIO_CHANNELS` | *(unset = no cap)* | Ceiling on audio channels (e.g. `6` = 5.1). |
+| `PLEX_TIMEOUT` | `120` | Per-request Plex read timeout (seconds). Raise it if large libraries time out. |
+| `PLEX_RETRIES` | `3` | Attempts for transient Plex failures (library/episode enumeration) before skipping, with exponential backoff. |
 | `SWEEP_INTERVAL_MINUTES` | `360` | Cadence of the always-on full-library sweep. |
 | `NEW_MEDIA_MODE` | `disabled` | `webhook`, `polling`, or `disabled`. |
 | `WEBHOOK_PORT` | `9999` | Listener port when `NEW_MEDIA_MODE=webhook`. |
@@ -393,6 +395,21 @@ On top of that:
 * **`polling`** *(no Plex Pass)* — scans each library's recently-added items
   every `RECENT_POLL_INTERVAL_MINUTES`.
 * **`disabled`** *(default)* — only the scheduled full sweep runs.
+
+---
+
+## Resilience
+
+Plex can be slow to respond on large libraries or a busy NAS. Babelarr is built
+so a single slow/failed Plex call never sinks a whole run:
+
+* Per-request timeout is `PLEX_TIMEOUT` seconds (default `120`).
+* The big enumeration calls (listing a library's items, a show's episodes) are
+  retried up to `PLEX_RETRIES` times (default `3`) with exponential backoff.
+* If a section still fails after retries, it is **skipped** and the sweep moves
+  on to the others; a single bad **item** is logged and skipped too.
+* Each sweep ends with a summary line, e.g.
+  `Full sweep complete (processed=1234, skipped=2)`, so problems are visible.
 
 ---
 

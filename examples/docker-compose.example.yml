@@ -49,6 +49,11 @@ services:
       - STATE_FILE=/config/babelarr-state.json   # default; only used by 'file'
       # Optional audio-quality ceiling by channel count (6 = 5.1). Unset = no cap.
       - MAX_AUDIO_CHANNELS=6
+      # Plex can be slow on big libraries / busy NAS. Raise the per-request
+      # timeout and keep a few retries so a transient hiccup doesn't abort a
+      # whole sweep.
+      - PLEX_TIMEOUT=120
+      - PLEX_RETRIES=3
       # Always-on full-library sweep cadence (minutes).
       - SWEEP_INTERVAL_MINUTES=360
       # How new media is caught between sweeps: webhook | polling | disabled
