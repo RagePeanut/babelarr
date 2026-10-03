@@ -101,11 +101,20 @@ def test_content_language_uzumaki():
     assert content_language_for(item, tmdb, is_movie=False) == "jpn"
 
 
-def test_content_language_multi_uses_available_audio():
-    # Production fr, spoken [ja, ko]; file has only ko audio -> ko.
+def test_content_language_multi_production_absent_uses_first_spoken():
+    # Production fr not among spoken [ja, ko] -> first spoken (ja).
+    # (No audio-track inspection anymore.)
     tmdb = FakeTMDB({9: ("fr", ("ja", "ko"))})
     item = FakeItem(tmdb_id=9, audio_langs=["ko"])
-    assert content_language_for(item, tmdb, is_movie=True) == "kor"
+    assert content_language_for(item, tmdb, is_movie=True) == "jpn"
+
+
+def test_content_language_silent_film():
+    # Only "no language" spoken -> NO_LANGUAGE sentinel.
+    from babelarr.langcodes import NO_LANGUAGE
+    tmdb = FakeTMDB({3: ("de", ("xx",))})
+    item = FakeItem(tmdb_id=3)
+    assert content_language_for(item, tmdb, is_movie=True) == NO_LANGUAGE
 
 
 def test_content_language_no_tmdb_match_is_none():

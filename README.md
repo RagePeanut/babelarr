@@ -45,6 +45,8 @@ key : pref1, pref2, pref3
   (see [Two languages](#two-languages-content-vs-production)). It may be:
   * a concrete language code (`fre`, `ja`, `de`, …), any ISO 639 form;
   * a **script class** (see below) — `cjk`, `kana`, `cyrillic`, …;
+  * `xx` / `silent` — matches [silent / no-language](#silent--no-language-titles)
+    content (useful mainly in `SUBTITLES_RULES`);
   * `default` — matches anything. **Only valid as the last entry.**
 * **preferences** — an ordered list; the **first available one wins**. Besides
   language codes, each concern allows certain reserved tokens (below).
@@ -224,17 +226,20 @@ So for *Uzumaki* with `AUDIO_RULES=default:original`, `SUBTITLES_RULES=...`,
 
 ### How the content language is resolved
 
-For audio/subtitles, Babelarr determines the content language in this order:
+For audio/subtitles, Babelarr determines the content language from TMDB
+**metadata only** (no inspection of the file's audio tracks), in this order:
 
 1. **Manual override** — a `babelarr-ov:<lang>` **label** on the item (see
-   below) wins outright.
-2. **Exactly one** spoken language on TMDB → use it.
-3. **Multiple** spoken, and the **first** equals the production language → use
-   the first spoken.
-4. **Multiple** spoken, first ≠ production → walk the spoken list in order and
-   use the first language the **file actually has an audio track for**.
-5. **Multiple** spoken but none of them are available as audio → the first
-   spoken language.
+   below) wins outright, including `babelarr-ov:silent`.
+2. **Only "no language" spoken** (a silent / music-only title, where TMDB's
+   `spoken_languages` is just `xx`) → the special **no-language** result (see
+   [Silent / no-language titles](#silent--no-language-titles)).
+3. **Exactly one** real spoken language → use it.
+4. **Multiple** spoken, and the **production** language is among them → use the
+   **production** language. (The order of `spoken_languages` is *not* a reliable
+   priority signal — e.g. *Nine to Five* lists `[French, English]` though it's an
+   English film — so the authoritative `original_language` wins when present.)
+5. **Multiple** spoken, production **not** among them → the **first** spoken.
 6. **No** spoken languages at all → fall back to the production language.
 
 ### Manual override — the `babelarr-ov:<lang>` label
@@ -243,7 +248,8 @@ When TMDB's data is odd (locked, mis-tagged, an unusual co-production), add a
 Plex **label** `babelarr-ov:<lang>` to the movie or show to force its **content
 language** (audio/subtitles only — posters/titles still use the production
 language). `<lang>` accepts any ISO 639 form (`ja` / `jpn`, `fr` / `fre` /
-`fra`). Applied to a show, it is inherited by all episodes.
+`fra`), plus `xx` / `silent` to force no-language. Applied to a show, it is
+inherited by all episodes.
 
 ```
 # Force Uzumaki's content language to Japanese regardless of TMDB:
@@ -252,6 +258,28 @@ babelarr-ov:ja
 
 > This label is **not** one of the `babelarr-locked:*` state labels; it's a
 > manual input you add yourself.
+
+### Silent / no-language titles
+
+Some titles are silent or music-only; TMDB marks these with a single `xx` ("No
+Language") in `spoken_languages` (e.g. *Metropolis*, 1927). Babelarr resolves
+their content language to a dedicated **no-language** value, which means:
+
+* **Audio** → left **untouched** (there's no spoken language to select; if the
+  file somehow has an explicit no-language audio track, that is chosen).
+* **Subtitles** → still rule-driven, treating "no language" as the content
+  language. Target it with an **`xx`** (or the friendlier alias **`silent`**)
+  key, e.g. `SUBTITLES_RULES=silent:off;...`. With no `xx`/`silent` rule it
+  falls through to `default` like any other language.
+
+```
+# Silent films: no subtitles; English audio -> French subs; else untouched
+SUBTITLES_RULES=silent:off;eng:fre
+```
+
+> Note: `xx` is TMDB's code for **no language** in `spoken_languages`. For
+> *poster* images TMDB uses `null` instead — Babelarr already handles that via
+> the poster `textless` token; the two are unrelated conventions.
 
 ---
 

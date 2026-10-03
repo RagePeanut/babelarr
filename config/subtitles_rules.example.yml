@@ -5,7 +5,8 @@
 # the FIRST matching key wins -- that rule is authoritative (it never falls
 # through to a later rule, not even `default`). Declaration ORDER MATTERS.
 #
-# Each key is an original/audio language (or a script class, or `default`).
+# Each key is the content/played-audio language -- a language code, a script
+# class, `xx`/`silent` (silent / no-dialogue titles), or `default`.
 # The value is an ordered list of subtitle preferences; the first one that is
 # actually present on the file wins. Reserved tokens for subtitles:
 #   off       -> force subtitles OFF
@@ -18,6 +19,7 @@
 #
 # Language codes may be given in any ISO 639 form (fr / fre / fra all work).
 rules:
-  - eng: [fre]              # English audio -> French subs, else untouched
+  - silent: [off]          # silent / no-dialogue films -> no subtitles
+  - eng: [fre]             # English audio -> French subs, else untouched
   - fre: [off]             # French audio  -> subtitles explicitly OFF
   - default: [fre, eng]    # anything else -> French, then English, else untouched

@@ -29,7 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
-from .langcodes import normalize
+from .langcodes import NO_LANGUAGE, is_no_language, normalize
 from .langscript import (
     class_covers_class,
     class_covers_language,
@@ -53,6 +53,7 @@ class RuleError(Exception):
 _KEY_LANGUAGE = "language"
 _KEY_SCRIPT = "script"
 _KEY_DEFAULT = "default"
+_KEY_NO_LANGUAGE = "no_language"  # matches silent / no-dialogue content (xx)
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,8 @@ class RuleKey:
     def covers_language(self, language_code: Optional[str]) -> bool:
         if self.kind == _KEY_DEFAULT:
             return True
+        if self.kind == _KEY_NO_LANGUAGE:
+            return language_code == NO_LANGUAGE or is_no_language(language_code)
         if self.kind == _KEY_SCRIPT:
             return class_covers_language(self.value, language_code)
         return normalize(language_code) == self.value
@@ -76,6 +79,10 @@ class RuleKey:
             return True
         if other.kind == _KEY_DEFAULT:
             return False  # default is broadest; nothing but default covers it
+        # No-language is a distinct bucket: it only shadows another no-language
+        # key, and nothing else shadows it (except default, handled above).
+        if self.kind == _KEY_NO_LANGUAGE or other.kind == _KEY_NO_LANGUAGE:
+            return self.kind == _KEY_NO_LANGUAGE and other.kind == _KEY_NO_LANGUAGE
         if self.kind == _KEY_SCRIPT and other.kind == _KEY_SCRIPT:
             return class_covers_class(self.value, other.value)
         if self.kind == _KEY_SCRIPT and other.kind == _KEY_LANGUAGE:
@@ -118,13 +125,16 @@ def _parse_key(raw: str) -> RuleKey:
         raise RuleError("Empty rule key")
     if key == DEFAULT_KEY:
         return RuleKey(raw=raw, kind=_KEY_DEFAULT, value=DEFAULT_KEY)
+    if is_no_language(key):
+        # xx / zxx / silent all map to the single no-language key.
+        return RuleKey(raw=raw, kind=_KEY_NO_LANGUAGE, value=NO_LANGUAGE)
     if is_script_class(key):
         return RuleKey(raw=raw, kind=_KEY_SCRIPT, value=key)
     norm = normalize(key)
     if norm is None:
         raise RuleError(
             f"Unknown rule key {raw!r}: not a language code, script class, "
-            f"or 'default'"
+            f"'xx'/'silent', or 'default'"
         )
     return RuleKey(raw=raw, kind=_KEY_LANGUAGE, value=norm)
 

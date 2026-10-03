@@ -28,7 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
-from .langcodes import normalize
+from .langcodes import is_no_language, normalize
 from .rules import RuleSet, TOKEN_OFF, TOKEN_ORIGINAL
 
 
@@ -87,10 +87,15 @@ def _best_track_in_language(
     ties). If the cap excludes every matching track, falls back to the
     lowest-channel matching track. Returns ``None`` if no track matches.
     """
-    lang = normalize(language)
-    if lang is None:
-        return None
-    matching = [a for a in audios if normalize(a.language_code) == lang]
+    if is_no_language(language):
+        # Silent/no-dialogue content: match an explicitly no-language audio
+        # track if one exists (rare), else nothing -> audio left untouched.
+        matching = [a for a in audios if is_no_language(a.language_code)]
+    else:
+        lang = normalize(language)
+        if lang is None:
+            return None
+        matching = [a for a in audios if normalize(a.language_code) == lang]
     if not matching:
         return None
     capped = [a for a in matching if max_channels is None or a.channels <= max_channels]

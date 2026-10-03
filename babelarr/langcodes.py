@@ -102,3 +102,18 @@ def same_language(a: Optional[str], b: Optional[str]) -> bool:
     """True if two codes refer to the same language after normalization."""
     na, nb = normalize(a), normalize(b)
     return na is not None and na == nb
+
+
+# Canonical "no spoken language" sentinel (silent films, music-only).
+# TMDB uses "xx" in spoken_languages for this; we also accept "silent" (friendly
+# alias) and the ISO "no linguistic content" code "zxx". It is intentionally
+# distinct from ``None`` (which means "unknown / undeterminable").
+NO_LANGUAGE = "xx"
+_NO_LANGUAGE_CODES = {"xx", "zxx", "silent"}
+
+
+def is_no_language(code: Optional[str]) -> bool:
+    """True if ``code`` is a 'no spoken language' marker (xx / zxx / silent)."""
+    if not code:
+        return False
+    return code.strip().lower() in _NO_LANGUAGE_CODES
