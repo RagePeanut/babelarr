@@ -120,24 +120,13 @@ def ov_override_for(item) -> Optional[str]:
     return None
 
 
-def _available_audio_languages(item) -> List[Optional[str]]:
-    """Collect the languages of all audio tracks across an item's parts."""
-    langs: List[Optional[str]] = []
-    for media in getattr(item, "media", []) or []:
-        for part in getattr(media, "parts", []) or []:
-            for s in part.audioStreams():
-                langs.append(
-                    getattr(s, "languageCode", None) or getattr(s, "language", None)
-                )
-    return langs
-
-
 def content_language_for(item, tmdb: "TMDBClient", is_movie: bool) -> Optional[str]:
     """Resolve a Plex item's CONTENT language (what it's spoken in).
 
     Drives audio and subtitles. Resolution: a ``babelarr-ov:<lang>`` label
-    override, else TMDB ``spoken_languages`` (with the file's available audio
-    tracks as a tiebreaker), falling back to the production language. See
+    override, else TMDB ``spoken_languages`` (preferring the production language
+    when it is among them), falling back to the production language. Returns the
+    ``NO_LANGUAGE`` sentinel for silent/no-dialogue titles. See
     ``langresolve.resolve_content_language``.
     """
     override = ov_override_for(item)
@@ -148,7 +137,6 @@ def content_language_for(item, tmdb: "TMDBClient", is_movie: bool) -> Optional[s
     return resolve_content_language(
         production_language=production,
         spoken_languages=spoken,
-        available_audio_languages=_available_audio_languages(item),
         override=override,
     )
 

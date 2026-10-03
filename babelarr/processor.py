@@ -89,8 +89,25 @@ class Processor:
 
     def _target_sections(self):
         wanted_types = (_MOVIE, _SHOW)
+        all_sections = self.server.library.sections()
+
+        # Warn about any configured PLEX_LIBRARIES name that doesn't exist on
+        # the server (likely a typo) -- warn, don't crash.
+        if self.config.libraries:
+            available = {s.title for s in all_sections}
+            for name in self.config.libraries:
+                if name not in available:
+                    log.warning(
+                        "PLEX_LIBRARIES: no library named %r on the Plex server "
+                        "(available movie/show libraries: %s)",
+                        name,
+                        ", ".join(sorted(
+                            s.title for s in all_sections if s.type in wanted_types
+                        )) or "none",
+                    )
+
         selected = []
-        for sec in self.server.library.sections():
+        for sec in all_sections:
             if sec.type not in wanted_types:
                 continue
             if self.config.libraries and sec.title not in self.config.libraries:
@@ -121,8 +138,16 @@ class Processor:
         log.info("Show: %s (production=%s)", show.title, production)
         with self._lock_for(show.ratingKey):
             self._process_poster_and_title(show, production, is_movie=False)
-        # Tracks use CONTENT language, resolved PER EPISODE (available audio
-        # tracks differ per file). Episodes inherit the series' TMDB metadata.
+
+        # Content language is pure TMDB metadata, so resolve it ONCE for the
+        # whole series (episodes inherit it) rather than per episode.
+        content = content_language_for(show, self.tmdb, is_movie=False)
+        if content is None:
+            log.debug("No content language for show %s; leaving tracks untouched",
+                      show.title)
+            return
+
+        log.debug("Listing episodes of %s", show.title)
         try:
             episodes = _with_retry(
                 show.episodes, self._retries(),
@@ -132,18 +157,23 @@ class Processor:
             log.exception("Could not list episodes of %s; skipping its tracks",
                           show.title)
             return
-        for episode in episodes:
+
+        total = len(episodes)
+        log.info("  %s: processing %d episode(s) (content=%s)",
+                 show.title, total, content)
+        for idx, episode in enumerate(episodes, 1):
             try:
                 with self._lock_for(episode.ratingKey):
-                    self.process_episode(episode, show=show)
+                    self._process_tracks(episode, content)
             except Exception:
                 log.exception("Skipping episode %s", getattr(episode, "title", "?"))
+            if idx % 25 == 0:
+                log.debug("  %s: %d/%d episodes done", show.title, idx, total)
 
     def process_episode(self, episode, show=None) -> None:
+        """Process a single episode's tracks (webhook / recent-poll entry)."""
         series = show if show is not None else episode.show()
         content = content_language_for(series, self.tmdb, is_movie=False)
-        # Re-resolve content language against THIS episode's audio tracks when
-        # the series lookup couldn't (multi-spoken titles need the file).
         if content is None:
             return
         with self._lock_for(episode.ratingKey):

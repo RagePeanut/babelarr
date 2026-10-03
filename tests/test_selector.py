@@ -76,6 +76,18 @@ def test_audio_no_match_returns_none():
     assert select_audio([_audio(1, "eng", 6)], "ko", _OV, None) is None
 
 
+def test_audio_silent_content_leaves_untouched():
+    # Content language is "xx" (silent) and no xx audio track exists -> None.
+    audios = [_audio(1, "eng", 6), _audio(2, "deu", 6)]
+    assert select_audio(audios, "xx", _OV, None) is None
+
+
+def test_audio_silent_content_selects_xx_track_if_present():
+    # A real no-language audio track IS a valid pick for silent content.
+    audios = [_audio(1, "eng", 6), _audio(2, "xx", 2)]
+    assert select_audio(audios, "xx", _OV, None) == 2
+
+
 def test_audio_codec_tiebreak():
     audios = [_audio(1, "eng", 6, codec="ac3"), _audio(2, "eng", 6, codec="truehd")]
     assert select_audio(audios, "en", _OV, None) == 2

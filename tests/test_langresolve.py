@@ -1,38 +1,51 @@
-"""Tests for content-language resolution (spoken-language vs production)."""
+"""Tests for content-language resolution (spoken vs production, no-language)."""
 
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from babelarr.langcodes import NO_LANGUAGE  # noqa: E402
 from babelarr.langresolve import resolve_content_language  # noqa: E402
 
 
-def R(prod, spoken, audio=(), override=None):
-    return resolve_content_language(prod, spoken, audio, override)
+def R(prod, spoken, override=None):
+    return resolve_content_language(prod, spoken, override)
 
 
 # 1. Manual override wins outright.
 def test_override_wins():
-    assert R("en", ["ja", "en"], audio=["en"], override="ko") == "kor"
+    assert R("en", ["ja", "en"], override="ko") == "kor"
 
 
 def test_override_accepts_any_iso_form():
-    # 639-1, 639-2/B, 639-2/T all normalize to the same canonical code.
     assert R("en", ["ja"], override="fr") == "fra"
     assert R("en", ["ja"], override="fre") == "fra"
     assert R("en", ["ja"], override="fra") == "fra"
 
 
-def test_override_ignored_when_blank():
-    # Empty/invalid override falls through to normal resolution.
+def test_override_can_force_no_language():
+    assert R("de", ["de"], override="silent") == NO_LANGUAGE
+    assert R("de", ["de"], override="xx") == NO_LANGUAGE
+
+
+def test_override_ignored_when_blank_or_junk():
     assert R("en", ["ja"], override="") == "jpn"
     assert R("en", ["ja"], override="zzz") == "jpn"
 
 
-# 2. Exactly one spoken language.
+# 2. Only "no language" spoken -> NO_LANGUAGE (Metropolis / silent).
+def test_only_no_language_spoken_is_silent():
+    assert R("de", ["xx"]) == NO_LANGUAGE
+
+
+def test_multiple_no_language_markers_is_silent():
+    assert R("de", ["xx", "zxx"]) == NO_LANGUAGE
+
+
+# 3. Exactly one real spoken language.
 def test_single_spoken_language_uzumaki():
-    # Production 'en' but spoken only 'ja' -> content is Japanese.
+    # Production 'en' but spoken only 'ja' -> Japanese.
     assert R("en", ["ja"]) == "jpn"
 
 
@@ -40,35 +53,33 @@ def test_single_spoken_matches_production():
     assert R("en", ["en"]) == "eng"
 
 
-# 3. Multiple spoken, first == production.
-def test_multiple_first_equals_production():
-    # First spoken (en) equals production -> use it, don't consult audio.
-    assert R("en", ["en", "ja"], audio=["ja"]) == "eng"
+def test_single_real_after_dropping_no_language():
+    # Silent marker alongside one real language -> the real one.
+    assert R("de", ["xx", "ja"]) == "jpn"
 
 
-# 4. Multiple spoken, first != production -> walk list vs available audio.
-def test_multiple_walk_available_audio():
-    # Production fr, spoken [ja, ko], audio has only ko -> ko.
-    assert R("fr", ["ja", "ko"], audio=["ko"]) == "kor"
+# 4. Multiple real, production among them -> production (Nine to Five).
+def test_nine_to_five_prefers_production_even_if_not_first():
+    # spoken=[French, English], production=English -> English (not French!).
+    assert R("en", ["fr", "en"]) == "eng"
 
 
-def test_multiple_walk_prefers_order():
-    # Both ja and ko available -> first in spoken order (ja) wins.
-    assert R("fr", ["ja", "ko"], audio=["ko", "ja"]) == "jpn"
+def test_multiple_production_among_when_first():
+    assert R("en", ["en", "fr"]) == "eng"
 
 
-# 5. Multiple, none available as audio -> first spoken.
-def test_multiple_none_available_first_spoken():
-    assert R("fr", ["ja", "ko"], audio=["en"]) == "jpn"
+# 5. Multiple real, production NOT among them -> first real spoken.
+def test_multiple_production_absent_uses_first_spoken():
+    assert R("en", ["ja", "ko"]) == "jpn"
 
 
-def test_multiple_no_audio_info_first_spoken():
-    assert R("fr", ["ja", "ko"], audio=[]) == "jpn"
+def test_multiple_production_none_uses_first_spoken():
+    assert R(None, ["ja", "ko"]) == "jpn"
 
 
-# 6. No spoken languages -> production language.
+# 6. No spoken at all -> production.
 def test_no_spoken_falls_back_to_production():
-    assert R("de", [], audio=["de"]) == "deu"
+    assert R("de", []) == "deu"
 
 
 def test_no_spoken_no_production_is_none():
@@ -76,11 +87,5 @@ def test_no_spoken_no_production_is_none():
 
 
 # normalization / junk handling
-def test_spoken_entries_normalized_and_filtered():
-    # Blank/None spoken entries are ignored.
-    assert R("en", [None, "", "ja"]) == "jpn"
-
-
-def test_single_valid_spoken_after_filtering():
-    # After filtering junk, only one real spoken language remains.
-    assert R("en", ["", "fr", None]) == "fra"
+def test_spoken_entries_normalized_and_deduped():
+    assert R("en", [None, "", "ja", "ja"]) == "jpn"

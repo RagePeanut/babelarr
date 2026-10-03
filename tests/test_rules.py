@@ -219,3 +219,46 @@ rules:
 """
     rs = parse_yaml(text, SUBTITLE_TOKENS)
     assert rs.match("eng") == ["fra", "off"]
+
+
+# --- no-language (xx / silent) key -----------------------------------------
+
+from babelarr.langcodes import NO_LANGUAGE  # noqa: E402
+
+
+def test_xx_key_matches_no_language_content():
+    rs = parse_inline("xx:off;default:fre", SUBTITLE_TOKENS)
+    assert rs.match(NO_LANGUAGE) == ["off"]
+
+
+def test_silent_alias_key_matches_no_language():
+    rs = parse_inline("silent:off;default:fre", SUBTITLE_TOKENS)
+    assert rs.match(NO_LANGUAGE) == ["off"]
+
+
+def test_no_language_falls_to_default_when_no_xx_rule():
+    rs = parse_inline("eng:fre;default:off", SUBTITLE_TOKENS)
+    assert rs.match(NO_LANGUAGE) == ["off"]  # via default
+
+
+def test_regular_language_key_does_not_match_no_language():
+    rs = parse_inline("fre:off", SUBTITLE_TOKENS)
+    assert rs.match(NO_LANGUAGE) is None  # fre rule doesn't catch xx, no default
+
+
+def test_xx_and_silent_are_duplicate_keys():
+    with pytest.raises(RuleError, match="Duplicate"):
+        parse_inline("xx:off;silent:fre", SUBTITLE_TOKENS)
+
+
+def test_xx_key_after_default_is_rejected():
+    # default must be last; an xx rule after it is unreachable.
+    with pytest.raises(RuleError, match="must be the last|Unreachable"):
+        parse_inline("default:fre;xx:off", SUBTITLE_TOKENS)
+
+
+def test_no_language_key_does_not_shadow_languages():
+    # xx and a real language are independent -> both reachable, any order.
+    rs = parse_inline("xx:off;eng:fre;default:eng", SUBTITLE_TOKENS)
+    assert rs.match(NO_LANGUAGE) == ["off"]
+    assert rs.match("eng") == ["fra"]
