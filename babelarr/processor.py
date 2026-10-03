@@ -180,8 +180,21 @@ class Processor:
             self._process_tracks(episode, content)
 
     def _process_tracks(self, video, content_language: str) -> None:
+        # Items from listing calls (notably episodes via show.episodes()) can be
+        # partial -- their media Parts come back WITHOUT Stream children, so
+        # audioStreams()/subtitleStreams() would be empty and nothing would be
+        # applied. Reload to fetch full stream data before inspecting tracks.
+        if not getattr(video, "isFullObject", lambda: True)():
+            try:
+                video.reload()
+            except Exception:  # pragma: no cover - defensive
+                log.exception("Could not reload %s before track processing",
+                              getattr(video, "title", "?"))
+
+        found_part = False
         for media in video.media:
             for part in media.parts:
+                found_part = True
                 try:
                     selection = select_for_part(
                         audios=_audio_views(part),
@@ -195,6 +208,9 @@ class Processor:
                 except Exception:  # pragma: no cover - defensive
                     log.exception("Failed processing part of %s",
                                   getattr(video, "title", "?"))
+        if not found_part:
+            log.debug("No media parts for %s; nothing to set",
+                      getattr(video, "title", "?"))
 
     def _process_poster_and_title(self, item, production_language, is_movie: bool) -> None:
         want_poster = not self.config.poster_rules.is_empty()
