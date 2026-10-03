@@ -69,6 +69,23 @@ def _with_retry(fn, attempts: int, what: str):
     raise last_exc
 
 
+def _has_any_stream(video) -> bool:
+    """True if any media part already exposes audio/subtitle streams.
+
+    Episodes from show.episodes() have Part but no Stream children until the
+    item's detail endpoint is loaded; this lets _process_tracks decide whether
+    a reload() is needed, without trusting isFullObject().
+    """
+    try:
+        for media in getattr(video, "media", []) or []:
+            for part in getattr(media, "parts", []) or []:
+                if part.audioStreams() or part.subtitleStreams():
+                    return True
+    except Exception:  # pragma: no cover - defensive
+        return True  # on error, assume present -> don't force a reload loop
+    return False
+
+
 class Processor:
     def __init__(self, config: Config, server: PlexServer, tmdb: TMDBClient,
                  state: StatePersistence = None):
@@ -180,8 +197,23 @@ class Processor:
             self._process_tracks(episode, content)
 
     def _process_tracks(self, video, content_language: str) -> None:
+        # Items from listing calls (notably episodes via show.episodes()) come
+        # back with Media and Part but WITHOUT the <Stream> children, so
+        # audioStreams()/subtitleStreams() are empty and nothing would be
+        # applied. The per-item detail endpoint (fetched by reload()) includes
+        # the streams. We don't rely on isFullObject() being accurate here:
+        # instead, if a part reports no streams, reload once and re-check.
+        if not _has_any_stream(video):
+            try:
+                video.reload()
+            except Exception:  # pragma: no cover - defensive
+                log.exception("Could not reload %s before track processing",
+                              getattr(video, "title", "?"))
+
+        found_part = False
         for media in video.media:
             for part in media.parts:
+                found_part = True
                 try:
                     selection = select_for_part(
                         audios=_audio_views(part),
@@ -195,6 +227,9 @@ class Processor:
                 except Exception:  # pragma: no cover - defensive
                     log.exception("Failed processing part of %s",
                                   getattr(video, "title", "?"))
+        if not found_part:
+            log.debug("No media parts for %s; nothing to set",
+                      getattr(video, "title", "?"))
 
     def _process_poster_and_title(self, item, production_language, is_movie: bool) -> None:
         want_poster = not self.config.poster_rules.is_empty()
