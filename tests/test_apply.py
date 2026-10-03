@@ -176,10 +176,48 @@ def test_poster_uploads_when_url_not_a_candidate():
     assert item.poster_selects == []
 
 
+def _has_label(item, field):
+    pre = f"babelarr-locked:{field}:".lower()
+    return any(t.lower().startswith(pre) for t in item._labels)
+
+
+def test_selected_poster_does_not_write_thumb_url():
+    # Selected poster: resulting key == URL, so the second value is unnecessary.
+    item = FakeItem(poster_locked=False, candidates=[FakePoster(URL)])
+    st = LabelState()
+    apply_poster(item, URL, {"poster"}, st, dry_run=False)
+    assert _has_label(item, "thumb")
+    assert not _has_label(item, "thumb-url")   # not written when redundant
+
+
+def test_uploaded_poster_writes_thumb_url():
+    # Uploaded poster: resulting key is upload://..., != URL, so we DO record it.
+    item = FakeItem(poster_locked=False, candidates=[FakePoster(URL2)])
+    st = LabelState()
+    apply_poster(item, URL, {"poster"}, st, dry_run=False)
+    assert _has_label(item, "thumb")
+    assert _has_label(item, "thumb-url")       # needed for rule-change detection
+
+
+def test_switch_upload_to_select_clears_thumb_url():
+    # First upload (writes thumb-url); then a run where the URL IS a candidate
+    # (select) must clear the now-stale thumb-url.
+    item = FakeItem(poster_locked=False, candidates=[FakePoster(URL2)])
+    st = LabelState()
+    apply_poster(item, URL, {"poster"}, st, dry_run=False)   # upload URL
+    assert _has_label(item, "thumb-url")
+    # Now URL becomes an available candidate; a fresh desired URL3 that is a
+    # candidate gets selected -> thumb-url cleared.
+    URL3 = "https://image.tmdb.org/t/p/original/ghi.jpg"
+    item._candidates.append(FakePoster(URL3))
+    apply_poster(item, URL3, set(), st, dry_run=False)
+    assert not _has_label(item, "thumb-url")
+
+
 def _record_poster(st, item, selected_key, url):
     """Seed prior state: resulting selected key + intended url."""
     st.record(item, "thumb", selected_key)
-    st.record(item, "thumb_url", url)
+    st.record(item, "thumb-url", url)
 
 
 def test_poster_not_reselected_when_already_ours():

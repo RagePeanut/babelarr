@@ -233,10 +233,12 @@ def apply_selection(part, selection: Selection, dry_run: bool) -> bool:
 # Plex field names behind each concern (for lock inspection).
 _FIELD_TITLE = "title"
 _FIELD_POSTER = "thumb"
-# Secondary state slot: the intended source URL of the poster Babelarr set.
-# Paired with _FIELD_POSTER (the resulting selected key) so we can answer both
-# "is the on-disk poster ours?" and "does it correspond to the wanted URL?".
-_FIELD_POSTER_URL = "thumb_url"
+# Secondary state slot: the intended source URL of a poster Babelarr UPLOADED.
+# Only needed for uploads, where the resulting key (upload://<hash>) differs
+# from the source URL; for a *selected* poster the resulting key already IS the
+# URL, so no second value is recorded. Lets us answer "does the uploaded poster
+# correspond to the URL the rules want now?" (rule-change detection).
+_FIELD_POSTER_URL = "thumb-url"
 
 
 def _is_field_locked(item, field_name: str) -> bool:
@@ -297,29 +299,31 @@ def _selected_poster_key(item):
 def apply_poster(item, poster_url, skip_user_locked, state, dry_run: bool) -> bool:
     """Set the poster to ``poster_url``, lock it, and fingerprint the result.
 
-    Babelarr records TWO things when it sets a poster: the **resulting selected
-    key** (``thumb``) and the **intended source URL** (``thumb_url``). Together
-    they answer both questions, for selected AND uploaded posters alike:
-
-    * ``ours`` = the currently-selected poster's key matches ``thumb`` -> the
-      poster in effect is the one Babelarr set (vs. a user hand-pick/swap).
-    * ``wanted`` = the recorded ``thumb_url`` matches this run's ``poster_url``
-      -> the poster Babelarr set corresponds to what the rules want now.
+    Babelarr records the **resulting selected key** (``thumb``) -- the poster
+    actually in effect (the source URL when selected from candidates, else the
+    ``upload://`` id). For an UPLOADED poster, whose key differs from the source
+    URL, it ALSO records the intended URL (``thumb-url``) so a later rule change
+    is detectable; for a selected poster that second value is unnecessary (the
+    key already IS the URL) and is not written.
 
     Behavior for a locked poster:
-    * not ``ours`` -> user hand-picked/swapped; skip when ``poster`` is in
-      ``skip_user_locked``.
-    * ``ours`` and ``wanted`` -> already correct; skip (no re-upload/select
-      every sweep -- works for uploaded posters too, since ``wanted`` compares
-      URL-to-URL, never key-to-URL).
-    * ``ours`` but not ``wanted`` -> rules changed; re-apply.
+    * not ``ours`` (selected key != recorded ``thumb``) -> user hand-picked/
+      swapped; skip when ``poster`` is in ``skip_user_locked``.
+    * ``ours`` and already the wanted poster -> skip (no re-set every sweep).
+    * ``ours`` but the rules now want a different poster -> re-apply.
 
     Setting prefers selecting an existing candidate over re-uploading.
     """
     current_key = _selected_poster_key(item)
     locked = _is_field_locked(item, _FIELD_POSTER)
     ours = state.is_ours(item, _FIELD_POSTER, current_key)
-    wanted = state.is_ours(item, _FIELD_POSTER_URL, poster_url)
+    # "wanted" = the poster in effect corresponds to this run's URL. For a
+    # selected poster the key IS the URL (thumb match); for an uploaded one we
+    # compare the separately-recorded source URL (thumb-url).
+    wanted = (
+        state.is_ours(item, _FIELD_POSTER, poster_url)
+        or state.is_ours(item, _FIELD_POSTER_URL, poster_url)
+    )
 
     # User hand-picked / swapped (locked, and the on-disk poster isn't ours).
     if locked and not ours and "poster" in skip_user_locked:
@@ -345,15 +349,19 @@ def apply_poster(item, poster_url, skip_user_locked, state, dry_run: bool) -> bo
     else:
         item.uploadPoster(url=poster_url)
     item.lockPoster()
-    # Record both the resulting selected key and the intended URL so a later run
-    # recognizes the poster (ownership) and whether it matches the rules (wanted).
     try:
         item.reload()
     except Exception:  # pragma: no cover - defensive
         pass
     resulting = _selected_poster_key(item) or poster_url
     state.record(item, _FIELD_POSTER, resulting)
-    state.record(item, _FIELD_POSTER_URL, poster_url)
+    # Only an upload needs the extra URL record (resulting key != URL). For a
+    # selected poster the key already equals the URL, so skip the redundancy
+    # and clear any stale thumb-url from a previous upload.
+    if resulting != poster_url:
+        state.record(item, _FIELD_POSTER_URL, poster_url)
+    else:
+        state.clear(item, _FIELD_POSTER_URL)
     return True
 
 
