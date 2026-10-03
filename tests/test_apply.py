@@ -54,9 +54,13 @@ class FakeItem:
     def posters(self):
         return self._candidates
 
+    def _select_only(self, poster):
+        for c in self._candidates:
+            c.selected = (c is poster)
+
     def setPoster(self, poster):
         self.poster_selects.append(poster.ratingKey)
-        poster.select()
+        self._select_only(poster)
 
     @property
     def fields(self):
@@ -84,6 +88,10 @@ class FakeItem:
 
     def uploadPoster(self, url=None):
         self.poster_uploads.append(url)
+        # Uploading creates a new upload:// poster and selects it.
+        up = FakePoster(f"upload://posters/{len(self.poster_uploads)}")
+        self._candidates.append(up)
+        self._select_only(up)
 
     def lockPoster(self):
         self.locked_poster = True
@@ -140,94 +148,23 @@ def test_title_dry_run_no_write():
     assert not item.edit_calls
 
 
-# --- posters (recognition by intended TMDB URL, Option B) -------------------
+# --- posters (recognition by the actually-selected poster key) --------------
 
 URL = "https://image.tmdb.org/t/p/original/abc.jpg"
 URL2 = "https://image.tmdb.org/t/p/original/def.jpg"
 
 
-def test_poster_set_when_unlocked():
-    item = FakeItem(poster_locked=False)
-    st = LabelState()
-    changed = apply_poster(item, URL, {"poster"}, st, dry_run=False)
-    assert changed
-    assert item.poster_uploads == [URL]
-    assert item.locked_poster
-    # Fingerprint recorded on the intended URL, so it's recognizable next run.
-    assert st.is_ours(item, "thumb", URL)
-
-
-def test_poster_not_reuploaded_when_already_ours():
-    # The every-run re-upload bug: locked + we recorded this exact URL -> skip.
-    item = FakeItem(poster_locked=True)
-    st = LabelState()
-    st.record(item, "thumb", URL)          # we set this poster on a prior run
-    changed = apply_poster(item, URL, {"poster"}, st, dry_run=False)
-    assert not changed
-    assert item.poster_uploads == []       # no re-upload
-
-
-def test_poster_rule_change_on_locked_is_not_reapplied_when_protected():
-    # Known limitation: once locked, "I set URL, rule now says URL2" is
-    # indistinguishable from "user hand-picked a poster". With poster in
-    # skip_user_locked we PROTECT (skip) rather than risk clobbering a user.
-    item = FakeItem(poster_locked=True)
-    st = LabelState()
-    st.record(item, "thumb", URL)
-    changed = apply_poster(item, URL2, {"poster"}, st, dry_run=False)
-    assert not changed
-    assert item.poster_uploads == []
-
-
-def test_poster_rule_change_reapplied_when_not_protected():
-    # If posters are NOT protected, a rule change DOES re-apply.
-    item = FakeItem(poster_locked=True)
-    st = LabelState()
-    st.record(item, "thumb", URL)
-    changed = apply_poster(item, URL2, set(), st, dry_run=False)
-    assert changed
-    assert item.poster_uploads == [URL2]
-
-
-def test_poster_skipped_when_user_locked():
-    # Locked, but we never recorded this URL (user hand-picked) -> skip.
-    item = FakeItem(poster_locked=True)
-    st = LabelState()
-    changed = apply_poster(item, URL, {"poster"}, st, dry_run=False)
-    assert not changed
-    assert item.poster_uploads == []
-
-
-def test_poster_user_swap_preserved():
-    # User swapped the poster; our recorded fingerprint is from a DIFFERENT url.
-    # Desired url != recorded -> not ours -> user-locked skip (not overwritten).
-    item = FakeItem(poster_locked=True)
-    st = LabelState()
-    st.record(item, "thumb", URL2)         # what we'd set differs from recorded
-    changed = apply_poster(item, URL, {"poster"}, st, dry_run=False)
-    assert not changed
-    assert item.poster_uploads == []
-
-
-def test_poster_overwrites_user_lock_when_not_protected():
-    # poster NOT in skip set -> overwrite even a user-locked poster.
-    item = FakeItem(poster_locked=True)
-    st = LabelState()
-    changed = apply_poster(item, URL, set(), st, dry_run=False)
-    assert changed
-    assert item.poster_uploads == [URL]
-
-
 def test_poster_selects_existing_candidate_instead_of_uploading():
-    # The wanted URL is already a poster candidate (TMDB) -> select, don't upload.
+    # Wanted URL is already a candidate -> select it, don't upload.
     item = FakeItem(poster_locked=False, candidates=[FakePoster(URL), FakePoster(URL2)])
     st = LabelState()
     changed = apply_poster(item, URL, {"poster"}, st, dry_run=False)
     assert changed
-    assert item.poster_uploads == []       # no upload
-    assert item.poster_selects == [URL]    # selected the existing candidate
+    assert item.poster_uploads == []
+    assert item.poster_selects == [URL]
     assert item.locked_poster
-    assert st.is_ours(item, "thumb", URL)  # recognizable next run
+    # Recorded the resulting selected key (the URL) -> recognizable next run.
+    assert st.is_ours(item, "thumb", URL)
 
 
 def test_poster_uploads_when_url_not_a_candidate():
@@ -235,5 +172,52 @@ def test_poster_uploads_when_url_not_a_candidate():
     st = LabelState()
     changed = apply_poster(item, URL, {"poster"}, st, dry_run=False)
     assert changed
-    assert item.poster_uploads == [URL]    # not a candidate -> upload
+    assert item.poster_uploads == [URL]
     assert item.poster_selects == []
+
+
+def test_poster_not_reselected_when_already_ours():
+    # Our poster already selected + already the wanted one -> skip (no thrash).
+    sel = FakePoster(URL, selected=True)
+    item = FakeItem(poster_locked=True, candidates=[sel, FakePoster(URL2)])
+    st = LabelState()
+    st.record(item, "thumb", URL)          # recorded resulting key = URL
+    changed = apply_poster(item, URL, {"poster"}, st, dry_run=False)
+    assert not changed
+    assert item.poster_selects == []
+    assert item.poster_uploads == []
+
+
+def test_poster_rule_change_reapplied_even_when_protected():
+    # Corrected P3: the selected poster IS ours (matches recorded), but the rule
+    # now wants a DIFFERENT poster -> re-apply, even with poster protected.
+    sel = FakePoster(URL, selected=True)
+    item = FakeItem(poster_locked=True, candidates=[sel, FakePoster(URL2)])
+    st = LabelState()
+    st.record(item, "thumb", URL)          # ours = the currently-selected URL
+    changed = apply_poster(item, URL2, {"poster"}, st, dry_run=False)
+    assert changed
+    assert item.poster_selects == [URL2]   # switched to the new rule's poster
+
+
+def test_poster_user_swap_preserved():
+    # User swapped to a poster we never recorded -> selected key != recorded ->
+    # not ours -> protected (skip).
+    swapped = FakePoster("upload://posters/userpick", selected=True)
+    item = FakeItem(poster_locked=True, candidates=[swapped, FakePoster(URL)])
+    st = LabelState()
+    st.record(item, "thumb", URL)          # we last set URL; user then swapped
+    changed = apply_poster(item, URL, {"poster"}, st, dry_run=False)
+    assert not changed
+    assert item.poster_selects == []
+    assert item.poster_uploads == []
+
+
+def test_poster_user_swap_overwritten_when_not_protected():
+    swapped = FakePoster("upload://posters/userpick", selected=True)
+    item = FakeItem(poster_locked=True, candidates=[swapped, FakePoster(URL)])
+    st = LabelState()
+    st.record(item, "thumb", URL)
+    changed = apply_poster(item, URL, set(), st, dry_run=False)
+    assert changed
+    assert item.poster_selects == [URL]    # re-selected our wanted poster

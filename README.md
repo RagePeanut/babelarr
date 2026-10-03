@@ -341,9 +341,10 @@ runs it compares to tell *its own* value apart from one **you** set by hand:
 * **Titles** fingerprint the title *string*. So Babelarr recognizes its own
   title (and won't rewrite it needlessly), and if you change `TITLE_RULES` the
   new title *does* get applied.
-* **Posters** fingerprint the *intended TMDB URL* (the uploaded poster's own
-  Plex id isn't stable, so the URL is the reliable signal). Babelarr recognizes
-  a poster it set to that URL and won't re-upload it every sweep.
+* **Posters** fingerprint the *selected poster's key* (the TMDB URL when the
+  poster was selected from candidates, else the upload id). Babelarr recognizes
+  the poster actually in effect — so it won't re-upload every sweep, re-applies
+  on a rule change, and can tell its own poster from one you swapped in.
 
 A locked field whose fingerprint doesn't match (you edited/swapped it, or
 Babelarr never set it) is treated as **user-owned**.
@@ -382,12 +383,10 @@ pick `labels` only if you specifically want all state inside Plex.
 > poster stays a clean provider entry. Only when the URL isn't among the
 > candidates does it upload.
 >
-> **Posters — rule changes on a locked poster.** Because a locked poster can't
-> be reliably told apart from one you hand-picked, if you change `POSTER_RULES`
-> for an item whose poster is already locked, Babelarr leaves it alone when
-> `poster` is protected by `SKIP_USER_LOCKED` (the safe choice — it never
-> clobbers a possible manual pick). Unprotect posters, or clear the lock, to let
-> a new rule re-apply.
+> Babelarr records the key of the poster actually in effect, so it recognizes
+> its own poster (no re-upload every sweep), re-applies when you change
+> `POSTER_RULES`, and leaves a poster you swapped in by hand alone (when
+> `poster` is protected by `SKIP_USER_LOCKED`).
 
 ---
 
