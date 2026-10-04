@@ -16,6 +16,7 @@ from .plex_client import connect
 from .processor import Processor
 from .tmdb import TMDBClient
 from . import webhook as webhook_mod
+from . import websocket_listener as websocket_mod
 
 log = logging.getLogger("babelarr")
 
@@ -88,8 +89,11 @@ def main() -> int:
     sweep_thread.start()
 
     http_server = None
+    ws_listener = None
     if config.new_media_mode == "webhook":
         http_server = webhook_mod.serve(processor, config.webhook_port)
+    elif config.new_media_mode == "websocket":
+        ws_listener = websocket_mod.serve(processor, server)
     elif config.new_media_mode == "polling":
         threading.Thread(
             target=_loop,
@@ -107,6 +111,8 @@ def main() -> int:
 
     if http_server is not None:
         http_server.shutdown()
+    if ws_listener is not None:
+        ws_listener.stop()
     log.info("Babelarr stopped")
     return 0
 
