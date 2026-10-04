@@ -155,26 +155,36 @@ def _is_active(s) -> bool:
     return bool(getattr(s, "default", False))
 
 
-def _current_stream_id(streams) -> Optional[int]:
+def _current_stream_id(streams, allow_default_fallback: bool = True) -> Optional[int]:
     """Id of the stream currently in effect, or None.
 
     ``selected`` is what Plex is *actually* using right now; ``default`` is a
-    static flag the muxer baked into the file. A file commonly marks one track
-    ``default`` while the user/Plex plays a *different* ``selected`` track (see
-    Akira: French ``default`` audio vs. the selected Japanese track). So we
-    must look for a ``selected`` stream FIRST across all streams, and only fall
-    back to ``default`` when nothing is selected at all. The old
-    ``selected or default`` + first-match logic returned the file-default id
-    whenever it appeared before the selected one, making the "already correct?"
-    check perpetually false and re-issuing redundant setSelected* writes.
+    static flag the muxer baked into the file. We always look for a ``selected``
+    stream FIRST across all streams (a file commonly marks one track ``default``
+    while a *different* track is actually ``selected`` -- see Akira: French
+    ``default`` audio vs. the selected Japanese track).
+
+    ``allow_default_fallback`` controls what happens when **nothing** is
+    selected:
+
+    * **Audio** (``True``): a video always plays *some* audio, so when no track
+      is selected the file ``default`` is what will play -- returning it lets us
+      skip a redundant re-set when the default already matches the target.
+    * **Subtitles** (``False``): a subtitle that is merely ``default`` but not
+      ``selected`` is **not showing** -- subtitles are simply OFF. Falling back
+      to ``default`` here would (a) make the "subs already off?" check think a
+      sub is active and reset it every sweep, and (b) make the "wanted sub
+      already active?" check skip actually enabling it. So subtitles must treat
+      "nothing selected" as ``None`` (off), ignoring ``default`` entirely.
     """
     streams = list(streams)
     for s in streams:
         if getattr(s, "selected", False):
             return s.id
-    for s in streams:
-        if getattr(s, "default", False):
-            return s.id
+    if allow_default_fallback:
+        for s in streams:
+            if getattr(s, "default", False):
+                return s.id
     return None
 
 
@@ -246,14 +256,20 @@ def apply_selection(part, selection: Selection, dry_run: bool) -> bool:
             changed = True
 
     if selection.disable_subtitles:
-        current = _current_stream_id(part.subtitleStreams())
+        # A subtitle is "on" only if actually selected; a merely-default track
+        # is NOT showing. Ignore default so we don't reset off subs every sweep.
+        current = _current_stream_id(
+            part.subtitleStreams(), allow_default_fallback=False
+        )
         if current is not None:
             log.info("  subtitles -> OFF%s", " (dry-run)" if dry_run else "")
             if not dry_run:
                 part.resetSelectedSubtitleStream()
             changed = True
     elif selection.subtitle_stream_id is not None:
-        current = _current_stream_id(part.subtitleStreams())
+        current = _current_stream_id(
+            part.subtitleStreams(), allow_default_fallback=False
+        )
         if current != selection.subtitle_stream_id:
             log.info("  subtitles -> stream %s%s", selection.subtitle_stream_id,
                      " (dry-run)" if dry_run else "")
