@@ -137,3 +137,55 @@ def test_falls_back_to_default_when_nothing_selected():
     changed = apply_selection(part, Selection(1, None, False), dry_run=False)
     assert not changed
     assert part.calls == []
+
+
+# --- subtitles: a merely-"default" track is NOT active (subs are OFF) --------
+# Regression: "Je me tue à le dire" has a French VOBSUB with default="1" but no
+# subtitle is selected="1" -> subs are OFF. The old default-fallback made the
+# "subs off?" check see the default track as active and reset OFF every sweep.
+
+
+def test_disable_subs_noop_when_only_a_default_sub_exists():
+    # No subtitle selected; one carries the file default flag. Subs are already
+    # off -> must NOT call resetSelectedSubtitleStream.
+    part = FakePart(subs=[
+        FakeStream(10, selected=False, default=True),   # French VOBSUB default
+        FakeStream(11, selected=False, default=False),  # Dutch
+    ])
+    changed = apply_selection(part, Selection(None, None, True), dry_run=False)
+    assert not changed
+    assert part.calls == []
+
+
+def test_disable_subs_still_fires_when_a_sub_is_selected():
+    # A subtitle IS actually selected -> turning subs off is a real change.
+    part = FakePart(subs=[
+        FakeStream(10, selected=True, default=True),
+        FakeStream(11, selected=False),
+    ])
+    changed = apply_selection(part, Selection(None, None, True), dry_run=False)
+    assert changed
+    assert ("sub_off", None) in part.calls
+
+
+def test_select_sub_fires_when_target_is_only_default_not_selected():
+    # Rule wants sub 10; it is the file default but NOT selected (not showing).
+    # We must actually enable it rather than assume it's already active.
+    part = FakePart(subs=[
+        FakeStream(10, selected=False, default=True),
+        FakeStream(11, selected=False),
+    ])
+    changed = apply_selection(part, Selection(None, 10, False), dry_run=False)
+    assert changed
+    assert ("sub", 10) in part.calls
+
+
+def test_select_sub_noop_only_when_target_actually_selected():
+    # Target 10 is genuinely selected -> no write.
+    part = FakePart(subs=[
+        FakeStream(10, selected=True, default=True),
+        FakeStream(11, selected=False),
+    ])
+    changed = apply_selection(part, Selection(None, 10, False), dry_run=False)
+    assert not changed
+    assert part.calls == []
