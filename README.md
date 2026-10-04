@@ -436,6 +436,12 @@ On top of that:
   events and processes just the new item immediately. Expose `WEBHOOK_PORT` and
   add a webhook in Plex (**Settings → Webhooks**) pointing at
   `http://<HOST-IP>:9999`.
+
+  Note: `library.new` fires **only when an item is first added**. If you later
+  change a bad match or edit metadata on an *existing* item, Plex does not fire
+  this event, so Babelarr won't react in real time — those changes are only
+  picked up by the next scheduled full-library sweep (`SWEEP_INTERVAL_MINUTES`).
+  Use `websocket` mode if you want re-matches handled immediately.
 * **`websocket`** *(no Plex Pass)* — Babelarr opens a WebSocket to Plex
   (`/:/websockets/notifications`) and reacts to library *timeline* activity in
   real time. It processes an item when Plex reports it fully processed
@@ -451,7 +457,9 @@ On top of that:
   state turns an unchanged item into a no-op, and a match burst is debounced
   per item. Requires `websocket-client` (already in the image).
 * **`polling`** *(no Plex Pass)* — scans each library's recently-added items
-  every `RECENT_POLL_INTERVAL_MINUTES`.
+  every `RECENT_POLL_INTERVAL_MINUTES`. Like `webhook`, this only sees *new*
+  items; a later re-match or metadata edit on an existing item is picked up by
+  the next full-library sweep, not this poll.
 * **`disabled`** *(default)* — only the scheduled full sweep runs.
 
 ---
