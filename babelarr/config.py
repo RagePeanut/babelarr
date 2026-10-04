@@ -63,23 +63,29 @@ DEFAULT_STATE_FILE = "/config/babelarr-state.json"
 # Lockable field types that SKIP_USER_LOCKED can protect.
 LOCKABLE_FIELDS = ("poster", "title")
 
-# concern name -> (env var, config-file key, allowed tokens)
+# concern name -> (env var, config-file key, allowed tokens, allow_forced)
+# ``allow_forced`` enables the ``<lang>-forced`` subtitle modifier; only
+# subtitles have a forced/non-forced distinction, so it is off elsewhere.
 _CONCERNS = {
-    "audio": ("AUDIO_RULES", "audio", AUDIO_TOKENS),
-    "subtitles": ("SUBTITLES_RULES", "subtitles", SUBTITLE_TOKENS),
-    "poster": ("POSTER_RULES", "poster", POSTER_TOKENS),
-    "title": ("TITLE_RULES", "title", TITLE_TOKENS),
+    "audio": ("AUDIO_RULES", "audio", AUDIO_TOKENS, False),
+    "subtitles": ("SUBTITLES_RULES", "subtitles", SUBTITLE_TOKENS, True),
+    "poster": ("POSTER_RULES", "poster", POSTER_TOKENS, False),
+    "title": ("TITLE_RULES", "title", TITLE_TOKENS, False),
 }
 
 
-def _rules_from_env_value(value: str, allowed_tokens: set, concern: str) -> RuleSet:
+def _rules_from_env_value(
+    value: str, allowed_tokens: set, concern: str, allow_forced: bool = False
+) -> RuleSet:
     """A single ``*_RULES`` env value: a YAML file path or an inline string."""
     value = value.strip()
     maybe_path = Path(value)
     try:
         if maybe_path.exists() and maybe_path.is_file():
-            return parse_yaml(maybe_path.read_text(encoding="utf-8"), allowed_tokens)
-        return parse_inline(value, allowed_tokens)
+            return parse_yaml(
+                maybe_path.read_text(encoding="utf-8"), allowed_tokens, allow_forced
+            )
+        return parse_inline(value, allowed_tokens, allow_forced)
     except RuleError as exc:
         raise ConfigError(f"{concern} rules: {exc}") from exc
 
@@ -114,15 +120,17 @@ def _load_config_file() -> dict:
 def _resolve_rules(file_sections: dict) -> dict:
     """Resolve each concern's RuleSet, env var overriding the config file."""
     resolved: dict = {}
-    for concern, (env_var, file_key, tokens) in _CONCERNS.items():
+    for concern, (env_var, file_key, tokens, allow_forced) in _CONCERNS.items():
         env_val = os.environ.get(env_var)
         if env_val is not None and env_val.strip():
             # Env var present -> overrides the config file for this concern.
-            resolved[concern] = _rules_from_env_value(env_val, tokens, concern)
+            resolved[concern] = _rules_from_env_value(
+                env_val, tokens, concern, allow_forced
+            )
         elif file_key in file_sections:
             try:
                 resolved[concern] = parse_rules_structure(
-                    file_sections[file_key], tokens
+                    file_sections[file_key], tokens, allow_forced
                 )
             except RuleError as exc:
                 raise ConfigError(f"{concern} rules (config file): {exc}") from exc

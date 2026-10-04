@@ -22,6 +22,8 @@
 # Reserved tokens per concern (`original` follows the key language above):
 #   audio      -> original            (the content-language track)
 #   subtitles  -> off                 (force subtitles OFF)
+#                 <lang>-forced       (match ONLY a forced track in <lang>,
+#                                       e.g. fre-forced, for signs/inserts)
 #   poster     -> original | textless (production-language poster; or TMDB "no
 #                                       language" poster -- NOT guaranteed
 #                                       text-free, community-categorized)
@@ -36,6 +38,7 @@ audio:
 
 subtitles:
   - eng: [fre]                   # English audio -> French subs, else untouched
+  - jpn: [fre, fre-forced, off]  # JP audio -> full FR, else FORCED FR, else OFF
   - fre: [off]                   # French audio  -> subtitles explicitly OFF
   - default: [fre, eng]          # else -> French, then English, else untouched
 

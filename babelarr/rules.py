@@ -44,9 +44,46 @@ TOKEN_OFF = "off"
 TOKEN_TEXTLESS = "textless"
 RESERVED_TOKENS = {TOKEN_ORIGINAL, TOKEN_OFF, TOKEN_TEXTLESS}
 
+# Modifier suffix for subtitle preferences: ``<lang>-forced`` means "only a
+# FORCED subtitle track in that language" (vs. a bare ``<lang>`` which prefers a
+# full/non-forced track and only falls back to forced). Valid on concrete
+# language codes for the subtitles concern only.
+FORCED_SUFFIX = "-forced"
+
 
 class RuleError(Exception):
     """Raised when a rule set is malformed or has an inconsistent order."""
+
+
+@dataclass(frozen=True)
+class Preference:
+    """A single ordered preference within a rule.
+
+    ``token`` is a normalized language code (639-3) or one of the reserved
+    tokens (``original`` / ``off`` / ``textless``). ``forced`` is a subtitle-only
+    modifier meaning "match only a forced track in this language".
+
+    For backward compatibility it compares equal to — and stringifies as — its
+    plain text form, so existing callers/tests that treat preferences as plain
+    strings (e.g. ``prefs == ["fra"]``) keep working. A forced preference's text
+    form is ``"<lang>-forced"``.
+    """
+
+    token: str
+    forced: bool = False
+
+    def __str__(self) -> str:
+        return f"{self.token}{FORCED_SUFFIX}" if self.forced else self.token
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, Preference):
+            return self.token == other.token and self.forced == other.forced
+        if isinstance(other, str):
+            return str(self) == other
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(str(self))
 
 
 # Kinds of key, used by the validator's "covers" logic.
@@ -96,7 +133,7 @@ class RuleKey:
 @dataclass
 class Rule:
     key: RuleKey
-    preferences: List[str]  # ordered; concrete codes and/or reserved tokens
+    preferences: List[Preference]  # ordered; concrete codes and/or reserved tokens
 
 
 @dataclass
@@ -108,10 +145,12 @@ class RuleSet:
     def is_empty(self) -> bool:
         return not self.rules
 
-    def match(self, original_language: Optional[str]) -> Optional[List[str]]:
+    def match(self, original_language: Optional[str]) -> Optional[List[Preference]]:
         """Return the preference list of the first matching rule, else ``None``.
 
         ``None`` means no rule matched (and no ``default``) -> leave untouched.
+        Each item is a :class:`Preference` (which compares/stringifies as its
+        plain text form for backward compatibility).
         """
         for rule in self.rules:
             if rule.key.covers_language(original_language):
@@ -139,24 +178,50 @@ def _parse_key(raw: str) -> RuleKey:
     return RuleKey(raw=raw, kind=_KEY_LANGUAGE, value=norm)
 
 
-def _parse_preferences(raw: str, allowed_tokens: set) -> List[str]:
-    out: List[str] = []
+def _parse_preferences(
+    raw: str, allowed_tokens: set, allow_forced: bool = False
+) -> List[Preference]:
+    out: List[Preference] = []
     for item in raw.split(","):
         item = item.strip().lower()
         if not item:
             continue
+
+        forced = False
+        if item.endswith(FORCED_SUFFIX):
+            if not allow_forced:
+                raise RuleError(
+                    f"The {FORCED_SUFFIX!r} modifier ({item!r}) is only valid "
+                    f"for subtitle rules"
+                )
+            lang_part = item[: -len(FORCED_SUFFIX)].strip()
+            if lang_part in RESERVED_TOKENS:
+                raise RuleError(
+                    f"The {FORCED_SUFFIX!r} modifier cannot be applied to the "
+                    f"reserved token {lang_part!r}; use it on a language, e.g. "
+                    f"'fre{FORCED_SUFFIX}'"
+                )
+            norm = normalize(lang_part)
+            if norm is None:
+                raise RuleError(
+                    f"Unknown language code before {FORCED_SUFFIX!r}: "
+                    f"{lang_part!r}"
+                )
+            out.append(Preference(token=norm, forced=True))
+            continue
+
         if item in RESERVED_TOKENS:
             if item not in allowed_tokens:
                 raise RuleError(
                     f"Token {item!r} is not valid for this rule type "
                     f"(allowed: {', '.join(sorted(allowed_tokens)) or 'none'})"
                 )
-            out.append(item)
+            out.append(Preference(token=item))
             continue
         norm = normalize(item)
         if norm is None:
             raise RuleError(f"Unknown language code in preferences: {item!r}")
-        out.append(norm)
+        out.append(Preference(token=norm))
     return out
 
 
@@ -196,18 +261,20 @@ def validate_order(rules: List[Rule]) -> None:
         seen.append(key)
 
 
-def parse_rules(entries: List[Tuple[str, str]], allowed_tokens: set) -> RuleSet:
+def parse_rules(
+    entries: List[Tuple[str, str]], allowed_tokens: set, allow_forced: bool = False
+) -> RuleSet:
     """Build and validate a RuleSet from ordered ``(key, prefs)`` string pairs."""
     rules: List[Rule] = []
     for raw_key, raw_prefs in entries:
         key = _parse_key(raw_key)
-        prefs = _parse_preferences(raw_prefs, allowed_tokens)
+        prefs = _parse_preferences(raw_prefs, allowed_tokens, allow_forced)
         rules.append(Rule(key=key, preferences=prefs))
     validate_order(rules)
     return RuleSet(rules=rules)
 
 
-def parse_inline(value: str, allowed_tokens: set) -> RuleSet:
+def parse_inline(value: str, allowed_tokens: set, allow_forced: bool = False) -> RuleSet:
     """Parse the compact string form, e.g. ``eng:fre;cjk:en;default:original``.
 
     Order of ``;``-separated chunks is preserved and significant.
@@ -223,10 +290,12 @@ def parse_inline(value: str, allowed_tokens: set) -> RuleSet:
             )
         key, _, prefs = chunk.partition(":")
         entries.append((key, prefs))
-    return parse_rules(entries, allowed_tokens)
+    return parse_rules(entries, allowed_tokens, allow_forced)
 
 
-def parse_rules_structure(raw, allowed_tokens: set) -> RuleSet:
+def parse_rules_structure(
+    raw, allowed_tokens: set, allow_forced: bool = False
+) -> RuleSet:
     """Build a RuleSet from an already-parsed YAML/JSON structure.
 
     ``raw`` is a LIST of single-key mappings (order explicit and unambiguous)::
@@ -252,16 +321,16 @@ def parse_rules_structure(raw, allowed_tokens: set) -> RuleSet:
     else:
         raise RuleError("rules must be a list or mapping")
 
-    return parse_rules(entries, allowed_tokens)
+    return parse_rules(entries, allowed_tokens, allow_forced)
 
 
-def parse_yaml(text: str, allowed_tokens: set) -> RuleSet:
+def parse_yaml(text: str, allowed_tokens: set, allow_forced: bool = False) -> RuleSet:
     """Parse a standalone per-concern YAML file (optionally wrapped in ``rules:``)."""
     import yaml  # lazy import
 
     data = yaml.safe_load(text) or {}
     raw = data.get("rules", data) if isinstance(data, dict) else data
-    return parse_rules_structure(raw, allowed_tokens)
+    return parse_rules_structure(raw, allowed_tokens, allow_forced)
 
 
 # YAML 1.1 treats several bare words as booleans (off/no/false -> False,

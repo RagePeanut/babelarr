@@ -13,13 +13,19 @@
 # (Subtitles have no `original` token: rules key on the played audio, so
 #  concrete language keys plus `default` already cover every case.)
 #
+# FORCED subtitles: append `-forced` to a language to match ONLY a forced track
+# in that language (for on-screen signs / foreign inserts), e.g. `fre-forced`.
+# A bare `fre` prefers a full/non-forced track and only falls back to forced if
+# that's all there is. The language is explicit and independent of the audio.
+#
 # If a matched rule's preferences are ALL missing, subtitles are left UNTOUCHED
 # (Plex decides) -- this is different from `off`, which explicitly disables them.
 # If NO rule matches (and there is no `default`), subtitles are left untouched.
 #
 # Language codes may be given in any ISO 639 form (fr / fre / fra all work).
 rules:
-  - silent: [off]          # silent / no-dialogue films -> no subtitles
-  - eng: [fre]             # English audio -> French subs, else untouched
-  - fre: [off]             # French audio  -> subtitles explicitly OFF
-  - default: [fre, eng]    # anything else -> French, then English, else untouched
+  - silent: [off]                 # silent / no-dialogue films -> no subtitles
+  - eng: [fre]                    # English audio -> French subs, else untouched
+  - jpn: [fre, fre-forced, off]   # JP audio -> full FR, else FORCED FR, else OFF
+  - fre: [off]                    # French audio  -> subtitles explicitly OFF
+  - default: [fre, eng]           # anything else -> French, then English
