@@ -418,7 +418,7 @@ come from a config file and/or `*_RULES` env vars — see
 | `PLEX_TIMEOUT` | `120` | Per-request Plex read timeout (seconds). Raise it if large libraries time out. |
 | `PLEX_RETRIES` | `3` | Attempts for transient Plex failures (library/episode enumeration) before skipping, with exponential backoff. |
 | `SWEEP_INTERVAL_MINUTES` | `360` | Cadence of the always-on full-library sweep. |
-| `NEW_MEDIA_MODE` | `disabled` | `webhook`, `polling`, or `disabled`. |
+| `NEW_MEDIA_MODE` | `disabled` | `webhook`, `alert`, `polling`, or `disabled`. |
 | `WEBHOOK_PORT` | `9999` | Listener port when `NEW_MEDIA_MODE=webhook`. |
 | `RECENT_POLL_INTERVAL_MINUTES` | `15` | Poll cadence when `NEW_MEDIA_MODE=polling`. |
 | `DRY_RUN` | `false` | Log intended changes without applying them. |
@@ -436,6 +436,20 @@ On top of that:
   events and processes just the new item immediately. Expose `WEBHOOK_PORT` and
   add a webhook in Plex (**Settings → Webhooks**) pointing at
   `http://<HOST-IP>:9999`.
+* **`alert`** *(no Plex Pass)* — Babelarr opens a WebSocket to Plex
+  (`/:/websockets/notifications`) and reacts to library *timeline* activity in
+  real time. It processes an item when Plex reports it fully processed
+  (timeline `state == 5`). Unlike `webhook`, this also catches a manual **Fix
+  Match**: Plex never fires `library.new` for a re-match, but it *does* re-run
+  the scanner/metadata timeline, so Babelarr re-applies its rules once the
+  corrected match settles. No port to expose; it connects out using
+  `PLEX_URL` / `PLEX_TOKEN`.
+
+  Note: Plex has no dedicated "match changed" event, so this reacts to *every*
+  completed timeline cycle (new import, Fix Match, auto-refresh, scheduled
+  maintenance). Redundant runs are harmless — Babelarr's per-field fingerprint
+  state turns an unchanged item into a no-op, and a match burst is debounced
+  per item. Requires `websocket-client` (already in the image).
 * **`polling`** *(no Plex Pass)* — scans each library's recently-added items
   every `RECENT_POLL_INTERVAL_MINUTES`.
 * **`disabled`** *(default)* — only the scheduled full sweep runs.

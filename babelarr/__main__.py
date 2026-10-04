@@ -15,6 +15,7 @@ from .config import Config, ConfigError
 from .plex_client import connect
 from .processor import Processor
 from .tmdb import TMDBClient
+from . import alert as alert_mod
 from . import webhook as webhook_mod
 
 log = logging.getLogger("babelarr")
@@ -88,8 +89,11 @@ def main() -> int:
     sweep_thread.start()
 
     http_server = None
+    alert_listener = None
     if config.new_media_mode == "webhook":
         http_server = webhook_mod.serve(processor, config.webhook_port)
+    elif config.new_media_mode == "alert":
+        alert_listener = alert_mod.serve(processor, server)
     elif config.new_media_mode == "polling":
         threading.Thread(
             target=_loop,
@@ -107,6 +111,8 @@ def main() -> int:
 
     if http_server is not None:
         http_server.shutdown()
+    if alert_listener is not None:
+        alert_listener.stop()
     log.info("Babelarr stopped")
     return 0
 
