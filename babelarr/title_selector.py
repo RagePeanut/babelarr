@@ -47,7 +47,7 @@ def select_title(options: TitleOptions, rules: RuleSet) -> Optional[str]:
             if options.original_title:
                 return options.original_title
             continue
-        want_norm = normalize(want)
+        want_norm = normalize(want.token)
         if want_norm is None:
             continue
         title = options.by_language.get(want_norm)

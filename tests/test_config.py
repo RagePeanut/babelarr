@@ -246,3 +246,25 @@ def test_skip_user_locked_alias_cannot_combine(base_env):
     base_env.setenv("SKIP_USER_LOCKED", "true,poster")
     with pytest.raises(ConfigError, match="cannot be combined"):
         Config.from_env()
+
+
+# --- forced-subtitle modifier wiring (subtitles only) ----------------------
+
+def test_subtitles_rules_accept_forced_modifier(base_env):
+    base_env.setenv("SUBTITLES_RULES", "jpn:fre,fre-forced,off;default:fre")
+    cfg = Config.from_env()
+    prefs = cfg.subtitle_rules.match("jpn")
+    assert prefs == ["fra", "fra-forced", "off"]
+    assert prefs[1].forced is True
+
+
+def test_audio_rules_reject_forced_modifier(base_env):
+    base_env.setenv("AUDIO_RULES", "jpn:jpn-forced")
+    with pytest.raises(ConfigError, match="only valid for subtitle"):
+        Config.from_env()
+
+
+def test_title_rules_reject_forced_modifier(base_env):
+    base_env.setenv("TITLE_RULES", "jpn:eng-forced")
+    with pytest.raises(ConfigError, match="only valid for subtitle"):
+        Config.from_env()

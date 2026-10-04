@@ -55,7 +55,7 @@ def select_poster(
         if want == TOKEN_TEXTLESS:
             candidates = [p for p in posters if normalize(p.language_code) is None]
         else:
-            want_lang = original_language if want == TOKEN_ORIGINAL else want
+            want_lang = original_language if want == TOKEN_ORIGINAL else want.token
             want_norm = normalize(want_lang)
             if want_norm is None:
                 continue

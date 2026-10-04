@@ -92,6 +92,34 @@ Because TMDB is community-maintained, these posters are **not guaranteed** to be
 free of title text — they're only *categorized* that way, and miscategorization
 happens. Treat it as best-effort.
 
+### Forced subtitles (`<lang>-forced`)
+
+**Subtitles only.** A subtitle preference may carry a `-forced` modifier, e.g.
+`fre-forced`, meaning "**only** a *forced* subtitle track in that language".
+This is for the classic case: watch a film in its original audio with **no full
+subtitles**, but still show the **forced** track that translates on-screen signs
+and foreign-language inserts.
+
+* `fre` (bare) — a French track, **preferring a full/non-forced** one; falls back
+  to a forced French track only if that's the only French option.
+* `fre-forced` — matches **only** a *forced* French track. If none is forced,
+  this preference is skipped and the next one is tried.
+
+The language is explicit and **independent of the audio** — forced subs are
+usually wanted in *your* language regardless of what audio plays, so you name it
+directly. Because preferences are ordered ("first available wins"), the common
+setup composes naturally:
+
+```yaml
+subtitles:
+  - jpn: [fre, fre-forced, off]   # full FR → else forced FR → else OFF
+  - default: [fre]
+```
+
+The `-forced` modifier is valid **only** on a concrete language in subtitle
+rules; using it in audio/poster/title rules, or on a reserved token
+(`off-forced`), is a startup error.
+
 ### Script classes
 
 Keys can match the **writing system** of the title's language (content or

@@ -123,7 +123,7 @@ def select_audio(
         return None  # no AUDIO_RULES / no match -> leave audio untouched
 
     for want in prefs:
-        want_lang = original_language if want == TOKEN_ORIGINAL else want
+        want_lang = original_language if want == TOKEN_ORIGINAL else want.token
         chosen = _best_track_in_language(audios, want_lang, max_channels)
         if chosen is not None:
             return chosen
@@ -150,14 +150,24 @@ def select_subtitle(
     for want in prefs:
         if want == TOKEN_OFF:
             return Selection(None, None, disable_subtitles=True)
-        want_norm = normalize(want)
+        want_norm = normalize(want.token)
         if want_norm is None:
             continue
         candidates = [s for s in subtitles if normalize(s.language_code) == want_norm]
         if not candidates:
             continue
-        non_forced = [s for s in candidates if not s.forced]
-        chosen = non_forced[0] if non_forced else candidates[0]
+        if want.forced:
+            # ``<lang>-forced``: match ONLY a forced track in this language. If
+            # none is forced, this preference doesn't apply -> try the next one.
+            forced = [s for s in candidates if s.forced]
+            if not forced:
+                continue
+            chosen = forced[0]
+        else:
+            # Bare ``<lang>``: prefer a full/non-forced track, fall back to a
+            # forced one only if that's all there is (historical behavior).
+            non_forced = [s for s in candidates if not s.forced]
+            chosen = non_forced[0] if non_forced else candidates[0]
         return Selection(None, chosen.id, disable_subtitles=False)
 
     # Matched rule but nothing available -> leave untouched (Plex handles it).

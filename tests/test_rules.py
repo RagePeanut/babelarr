@@ -262,3 +262,54 @@ def test_no_language_key_does_not_shadow_languages():
     rs = parse_inline("xx:off;eng:fre;default:eng", SUBTITLE_TOKENS)
     assert rs.match(NO_LANGUAGE) == ["off"]
     assert rs.match("eng") == ["fra"]
+
+
+# --- forced-subtitle modifier (<lang>-forced) ------------------------------
+
+from babelarr.rules import Preference  # noqa: E402
+
+
+def test_forced_modifier_parsed_as_preference():
+    rs = parse_inline("jpn:fre,fre-forced,off", SUBTITLE_TOKENS, allow_forced=True)
+    prefs = rs.match("jpn")
+    # Backward-compat: compares/stringifies as plain text.
+    assert prefs == ["fra", "fra-forced", "off"]
+    # Structured: the middle pref carries the forced flag.
+    assert prefs[0] == Preference("fra", forced=False)
+    assert prefs[1] == Preference("fra", forced=True)
+    assert prefs[1].forced is True
+    assert prefs[0].forced is False
+
+
+def test_forced_modifier_rejected_when_not_allowed():
+    # Audio/poster/title rules have no forced/non-forced distinction.
+    with pytest.raises(RuleError, match="only valid for subtitle"):
+        parse_inline("jpn:eng-forced", TITLE_TOKENS)
+    with pytest.raises(RuleError, match="only valid for subtitle"):
+        parse_inline("default:original-forced", POSTER_TOKENS)
+
+
+def test_forced_modifier_on_reserved_token_rejected():
+    with pytest.raises(RuleError, match="reserved token"):
+        parse_inline("jpn:off-forced", SUBTITLE_TOKENS, allow_forced=True)
+
+
+def test_forced_modifier_on_unknown_language_rejected():
+    with pytest.raises(RuleError, match="Unknown language code before"):
+        parse_inline("jpn:zzz-forced", SUBTITLE_TOKENS, allow_forced=True)
+
+
+@pytest.mark.skipif(
+    __import__("importlib").util.find_spec("yaml") is None,
+    reason="PyYAML not installed",
+)
+def test_forced_modifier_via_yaml():
+    text = """
+rules:
+  - jpn: [fre, fre-forced, off]
+  - default: [fre]
+"""
+    rs = parse_yaml(text, SUBTITLE_TOKENS, allow_forced=True)
+    prefs = rs.match("jpn")
+    assert prefs == ["fra", "fra-forced", "off"]
+    assert prefs[1].forced is True

@@ -188,6 +188,67 @@ def test_prefers_non_forced_subtitle():
     assert sel.subtitle_stream_id == 11
 
 
+# --- forced-subtitle preference (<lang>-forced) ----------------------------
+
+def _subsf(value):
+    """Subtitle rules with the ``<lang>-forced`` modifier enabled."""
+    return parse_inline(value, SUBTITLE_TOKENS, allow_forced=True)
+
+
+def test_forced_pref_selects_forced_track_in_that_language():
+    # Canonical case: jpn audio -> full fr, else forced fr, else off.
+    rules = _subsf("jpn:fre,fre-forced,off")
+    # Only a forced French track exists -> the fre-forced pref catches it.
+    subs = [_sub(10, "fre", forced=True), _sub(11, "eng", forced=False)]
+    sel = select_subtitle(subs, "jpn", rules)
+    assert sel.subtitle_stream_id == 10
+    assert not sel.disable_subtitles
+
+
+def test_full_pref_wins_over_forced_when_both_present():
+    # With a full fr track present, bare 'fre' matches first; fre-forced unused.
+    rules = _subsf("jpn:fre,fre-forced,off")
+    subs = [_sub(10, "fre", forced=True), _sub(11, "fre", forced=False)]
+    sel = select_subtitle(subs, "jpn", rules)
+    assert sel.subtitle_stream_id == 11
+    assert not sel.disable_subtitles
+
+
+def test_forced_pref_falls_through_to_off_when_no_forced_track():
+    # fre full absent, and the only fr track is NOT forced -> fre matches it
+    # (bare fre), so we never reach off. Guards against over-eager disabling.
+    rules = _subsf("jpn:fre-forced,off")
+    subs = [_sub(11, "fre", forced=False)]
+    sel = select_subtitle(subs, "jpn", rules)
+    # fre-forced requires a forced track; the non-forced one doesn't qualify ->
+    # fall through to off.
+    assert sel.subtitle_stream_id is None
+    assert sel.disable_subtitles
+
+
+def test_forced_only_rule_with_no_fr_at_all_falls_to_off():
+    rules = _subsf("jpn:fre-forced,off")
+    subs = [_sub(11, "eng", forced=False)]
+    sel = select_subtitle(subs, "jpn", rules)
+    assert sel.disable_subtitles
+
+
+def test_forced_language_independent_of_audio():
+    # Forced subs in MY language (eng) regardless of the jpn audio playing.
+    rules = _subsf("jpn:eng-forced,off")
+    subs = [_sub(20, "eng", forced=True), _sub(21, "fre", forced=False)]
+    sel = select_subtitle(subs, "jpn", rules)
+    assert sel.subtitle_stream_id == 20
+
+
+def test_forced_pref_ignores_non_forced_of_same_language():
+    # eng-forced must NOT grab a non-forced eng track; it should skip to next.
+    rules = _subsf("jpn:eng-forced,fre")
+    subs = [_sub(20, "eng", forced=False), _sub(21, "fre", forced=False)]
+    sel = select_subtitle(subs, "jpn", rules)
+    assert sel.subtitle_stream_id == 21  # fell through to fre
+
+
 # --- full part selection ---------------------------------------------------
 
 def test_select_for_part_japanese_movie_ov():
