@@ -418,7 +418,7 @@ come from a config file and/or `*_RULES` env vars — see
 | `PLEX_TIMEOUT` | `120` | Per-request Plex read timeout (seconds). Raise it if large libraries time out. |
 | `PLEX_RETRIES` | `3` | Attempts for transient Plex failures (library/episode enumeration) before skipping, with exponential backoff. |
 | `SWEEP_INTERVAL_MINUTES` | `360` | Cadence of the always-on full-library sweep. |
-| `NEW_MEDIA_MODE` | `disabled` | `webhook`, `alert`, `polling`, or `disabled`. |
+| `NEW_MEDIA_MODE` | `disabled` | `webhook`, `websocket`, `polling`, or `disabled`. |
 | `WEBHOOK_PORT` | `9999` | Listener port when `NEW_MEDIA_MODE=webhook`. |
 | `RECENT_POLL_INTERVAL_MINUTES` | `15` | Poll cadence when `NEW_MEDIA_MODE=polling`. |
 | `DRY_RUN` | `false` | Log intended changes without applying them. |
@@ -436,7 +436,7 @@ On top of that:
   events and processes just the new item immediately. Expose `WEBHOOK_PORT` and
   add a webhook in Plex (**Settings → Webhooks**) pointing at
   `http://<HOST-IP>:9999`.
-* **`alert`** *(no Plex Pass)* — Babelarr opens a WebSocket to Plex
+* **`websocket`** *(no Plex Pass)* — Babelarr opens a WebSocket to Plex
   (`/:/websockets/notifications`) and reacts to library *timeline* activity in
   real time. It processes an item when Plex reports it fully processed
   (timeline `state == 5`). Unlike `webhook`, this also catches a manual **Fix

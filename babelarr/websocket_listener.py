@@ -1,7 +1,7 @@
-"""Plex WebSocket alert listener for new/re-matched media.
+"""Plex WebSocket listener for new/re-matched media (NEW_MEDIA_MODE=websocket).
 
 Unlike the ``library.new`` webhook (which only fires when an item is *first*
-added, and requires Plex Pass), the alert stream reacts to **any** library
+added, and requires Plex Pass), the WebSocket stream reacts to **any** library
 timeline activity — including a manual *Fix Match*, which re-downloads metadata
 for an item that already exists. Plex never fires ``library.new`` for a
 re-match, so this mode is the only real-time way to catch "the user corrected a
@@ -9,7 +9,7 @@ bad match".
 
 How it works
 ------------
-``PlexServer.startAlertListener(callback)`` opens a websocket to
+``PlexServer.startAlertListener(callback)`` opens a WebSocket to
 ``/:/websockets/notifications`` and hands each ``NotificationContainer`` to our
 callback. For library processing Plex sends ``type == "timeline"`` messages
 whose ``TimelineEntry`` items carry, for identifier
@@ -41,7 +41,7 @@ import threading
 
 from .webhook import _safe_process
 
-log = logging.getLogger("babelarr.alert")
+log = logging.getLogger("babelarr.websocket")
 
 # Identifier Plex uses for library (scanner/metadata) timeline entries.
 _LIBRARY_IDENTIFIER = "com.plexapp.plugins.library"
@@ -51,7 +51,7 @@ _STATE_PROCESSED = 5
 _DEBOUNCE_SECONDS = 5.0
 
 
-class AlertDispatcher:
+class WebSocketDispatcher:
     """Turns Plex timeline notifications into debounced processor dispatches."""
 
     def __init__(self, processor, debounce_seconds: float = _DEBOUNCE_SECONDS):
@@ -64,7 +64,7 @@ class AlertDispatcher:
     # -- websocket callbacks -------------------------------------------------
 
     def on_message(self, data: dict) -> None:
-        """Handle one NotificationContainer from the alert websocket."""
+        """Handle one NotificationContainer from the Plex WebSocket."""
         try:
             if data.get("type") != "timeline":
                 return
@@ -83,10 +83,10 @@ class AlertDispatcher:
                     continue
                 self._schedule(rating_key)
         except Exception:  # pragma: no cover - defensive, never kill the socket
-            log.exception("Error handling alert message")
+            log.exception("Error handling WebSocket message")
 
     def on_error(self, error) -> None:
-        log.warning("Alert listener error: %s", error)
+        log.warning("WebSocket listener error: %s", error)
 
     # -- debounce ------------------------------------------------------------
 
@@ -110,16 +110,16 @@ class AlertDispatcher:
     def _fire(self, rating_key: int) -> None:
         with self._lock:
             self._timers.pop(rating_key, None)
-        log.info("Alert timeline -> processing ratingKey=%s", rating_key)
+        log.info("WebSocket timeline -> processing ratingKey=%s", rating_key)
         _safe_process(self._processor, rating_key)
 
     # -- lifecycle -----------------------------------------------------------
 
-    def start(self, server) -> "AlertDispatcher":
+    def start(self, server) -> "WebSocketDispatcher":
         self._listener = server.startAlertListener(
             callback=self.on_message, callbackError=self.on_error
         )
-        log.info("Alert listener started (Plex websocket)")
+        log.info("WebSocket listener started (Plex notifications)")
         return self
 
     def stop(self) -> None:
@@ -134,6 +134,6 @@ class AlertDispatcher:
             self._timers.clear()
 
 
-def serve(processor, server) -> AlertDispatcher:
-    """Start the alert listener; returns a handle with a ``stop()`` method."""
-    return AlertDispatcher(processor).start(server)
+def serve(processor, server) -> WebSocketDispatcher:
+    """Start the WebSocket listener; returns a handle with a ``stop()`` method."""
+    return WebSocketDispatcher(processor).start(server)

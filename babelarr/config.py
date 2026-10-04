@@ -213,7 +213,7 @@ class Config:
     plex_timeout: int  # per-request Plex read timeout (seconds)
     plex_retries: int  # retry attempts for transient Plex failures
     sweep_interval_minutes: int
-    new_media_mode: str  # webhook | alert | polling | disabled
+    new_media_mode: str  # webhook | websocket | polling | disabled
     webhook_port: int
     recent_poll_interval_minutes: int
     dry_run: bool
@@ -242,9 +242,9 @@ class Config:
         )
 
         mode = os.environ.get("NEW_MEDIA_MODE", "disabled").strip().lower()
-        if mode not in ("webhook", "alert", "polling", "disabled"):
+        if mode not in ("webhook", "websocket", "polling", "disabled"):
             raise ConfigError(
-                "NEW_MEDIA_MODE must be webhook|alert|polling|disabled, "
+                "NEW_MEDIA_MODE must be webhook|websocket|polling|disabled, "
                 f"got {mode!r}"
             )
 

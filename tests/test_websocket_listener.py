@@ -1,7 +1,7 @@
-"""Tests for the Plex WebSocket alert dispatcher (NEW_MEDIA_MODE=alert).
+"""Tests for the Plex WebSocket dispatcher (NEW_MEDIA_MODE=websocket).
 
 These exercise the pure message-filtering + debounce logic in
-``AlertDispatcher`` without a real Plex websocket: we feed it the
+``WebSocketDispatcher`` without a real Plex WebSocket: we feed it the
 ``NotificationContainer`` dicts plexapi would hand our callback and assert which
 ratingKeys get dispatched to the processor.
 """
@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest  # noqa: E402
 
-from babelarr.alert import AlertDispatcher  # noqa: E402
+from babelarr.websocket_listener import WebSocketDispatcher  # noqa: E402
 
 
 class FakeProcessor:
@@ -40,7 +40,7 @@ def _timeline(item_id, state, identifier="com.plexapp.plugins.library"):
 
 def _make(processor, debounce=0.02):
     # Tiny debounce so tests stay fast but still exercise the timer path.
-    return AlertDispatcher(processor, debounce_seconds=debounce)
+    return WebSocketDispatcher(processor, debounce_seconds=debounce)
 
 
 def _wait(proc, timeout=1.0):
