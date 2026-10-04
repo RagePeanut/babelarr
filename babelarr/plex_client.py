@@ -193,15 +193,40 @@ def _audio_views(part) -> List[AudioStreamView]:
     return views
 
 
+# Matches the English word "forced" in a subtitle track's title (whole word,
+# case-insensitive), e.g. "Français [FORCED]". Used only as a fallback for
+# poorly-tagged files (see _subtitle_views).
+_FORCED_TITLE_RE = re.compile(r"\bforced\b", re.IGNORECASE)
+
+
+def _title_marks_forced(s) -> bool:
+    """True if a subtitle stream's title/display text contains "forced"."""
+    for attr in ("title", "extendedDisplayTitle", "displayTitle"):
+        text = getattr(s, attr, None)
+        if text and _FORCED_TITLE_RE.search(text):
+            return True
+    return False
+
+
 def _subtitle_views(part) -> List[SubtitleStreamView]:
+    streams = list(part.subtitleStreams())
+    # Prefer the proper ``forced`` track flag. Only if NO track in this part
+    # carries it do we fall back to detecting the word "forced" in titles --
+    # this is a well-structured-file check: when at least one track is properly
+    # flagged we trust the flags and ignore the (often unreliable) titles.
+    any_flagged = any(bool(getattr(s, "forced", False)) for s in streams)
     views = []
-    for s in part.subtitleStreams():
+    for s in streams:
+        if any_flagged:
+            forced = bool(getattr(s, "forced", False))
+        else:
+            forced = _title_marks_forced(s)
         views.append(
             SubtitleStreamView(
                 id=s.id,
                 language_code=getattr(s, "languageCode", None) or getattr(s, "language", None),
                 is_default=_is_active(s),
-                forced=bool(getattr(s, "forced", False)),
+                forced=forced,
             )
         )
     return views
