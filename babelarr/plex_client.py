@@ -193,15 +193,40 @@ def _audio_views(part) -> List[AudioStreamView]:
     return views
 
 
+# Matches the English word "forced" in a subtitle track's title (whole word,
+# case-insensitive), e.g. "Français [FORCED]". Used only as a fallback for
+# poorly-tagged files (see _subtitle_views).
+_FORCED_TITLE_RE = re.compile(r"\bforced\b", re.IGNORECASE)
+
+
+def _title_marks_forced(s) -> bool:
+    """True if a subtitle stream's title/display text contains "forced"."""
+    for attr in ("title", "extendedDisplayTitle", "displayTitle"):
+        text = getattr(s, attr, None)
+        if text and _FORCED_TITLE_RE.search(text):
+            return True
+    return False
+
+
 def _subtitle_views(part) -> List[SubtitleStreamView]:
+    streams = list(part.subtitleStreams())
+    # Prefer the proper ``forced`` track flag. Only if NO track in this part
+    # carries it do we fall back to detecting the word "forced" in titles --
+    # this is a well-structured-file check: when at least one track is properly
+    # flagged we trust the flags and ignore the (often unreliable) titles.
+    any_flagged = any(bool(getattr(s, "forced", False)) for s in streams)
     views = []
-    for s in part.subtitleStreams():
+    for s in streams:
+        if any_flagged:
+            forced = bool(getattr(s, "forced", False))
+        else:
+            forced = _title_marks_forced(s)
         views.append(
             SubtitleStreamView(
                 id=s.id,
                 language_code=getattr(s, "languageCode", None) or getattr(s, "language", None),
                 is_default=_is_active(s),
-                forced=bool(getattr(s, "forced", False)),
+                forced=forced,
             )
         )
     return views
@@ -307,6 +332,11 @@ def _selected_poster_key(item):
     return None
 
 
+def _label_tags(labels) -> list:
+    """Tag strings from a plexapi label list (or our fakes)."""
+    return [getattr(l, "tag", None) for l in (labels or []) if getattr(l, "tag", None)]
+
+
 def apply_poster(item, poster_url, skip_user_locked, state, dry_run: bool) -> bool:
     """Set the poster to ``poster_url``, lock it, and fingerprint the result.
 
@@ -353,6 +383,15 @@ def apply_poster(item, poster_url, skip_user_locked, state, dry_run: bool) -> bo
              " (dry-run)" if dry_run else "")
     if dry_run:
         return True
+    # Snapshot the labels as they are on the server *now*, before any reload.
+    # The label state self-heals by removing prior lock labels for the field,
+    # reading them from ``item.labels`` -- but ``item.reload()`` below can
+    # return a copy that doesn't yet reflect a lock label written on a PREVIOUS
+    # run (Plex is eventually-consistent on label writes). If the stale
+    # post-reload list drove the self-heal, the old ``thumb`` fingerprint label
+    # would never be removed and duplicates would accumulate. So we pass these
+    # pre-reload tags into record/clear so the self-heal sees the true state.
+    labels_before = _label_tags(getattr(item, "labels", None))
     if existing is not None:
         # Wanted poster is already a candidate (e.g. a TMDB poster Plex knows)
         # -- select it instead of re-downloading/uploading.
@@ -365,14 +404,14 @@ def apply_poster(item, poster_url, skip_user_locked, state, dry_run: bool) -> bo
     except Exception:  # pragma: no cover - defensive
         pass
     resulting = _selected_poster_key(item) or poster_url
-    state.record(item, _FIELD_POSTER, resulting)
+    state.record(item, _FIELD_POSTER, resulting, extra_tags=labels_before)
     # Only an upload needs the extra URL record (resulting key != URL). For a
     # selected poster the key already equals the URL, so skip the redundancy
     # and clear any stale thumb-url from a previous upload.
     if resulting != poster_url:
-        state.record(item, _FIELD_POSTER_URL, poster_url)
+        state.record(item, _FIELD_POSTER_URL, poster_url, extra_tags=labels_before)
     else:
-        state.clear(item, _FIELD_POSTER_URL)
+        state.clear(item, _FIELD_POSTER_URL, extra_tags=labels_before)
     return True
 
 

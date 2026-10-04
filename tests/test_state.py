@@ -98,6 +98,26 @@ def test_label_per_field_independent():
     assert not st.is_ours(item, "title", "P")
 
 
+def test_label_record_extra_tags_heals_label_missing_from_item():
+    # Simulate the post-reload gap: a prior-run lock label IS on the server but
+    # NOT in item.labels (eventual consistency). Passing it via extra_tags must
+    # let record() remove it, leaving exactly one thumb label.
+    st = LabelState()
+    old = label_for("thumb", "OldPoster")       # on server, missing from item
+    item = FakeItem(labels=[])                   # reloaded copy lost the label
+    st.record(item, "thumb", "NewPoster", extra_tags=[old])
+    thumbs = [t for t in item._labels if t.startswith("babelarr-locked:thumb:")]
+    assert thumbs == [label_for("thumb", "NewPoster")]  # exactly one, the fresh
+
+
+def test_label_clear_extra_tags_removes_label_missing_from_item():
+    st = LabelState()
+    old = label_for("thumb-url", "http://x/p.jpg")
+    item = FakeItem(labels=[])
+    st.clear(item, "thumb-url", extra_tags=[old])
+    assert item._labels == []  # the stale one was removed via extra_tags
+
+
 def test_label_none_value_not_ours():
     st = LabelState()
     item = FakeItem()

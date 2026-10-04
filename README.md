@@ -120,6 +120,17 @@ The `-forced` modifier is valid **only** on a concrete language in subtitle
 rules; using it in audio/poster/title rules, or on a reserved token
 (`off-forced`), is a startup error.
 
+**Detecting forced tracks.** Babelarr normally reads Plex's proper `forced`
+track flag. Some poorly-tagged releases, though, encode "forced" **only** in the
+track's title (e.g. `Français [FORCED]`) and leave the flag unset. To cope,
+Babelarr falls back to the title: if **no** subtitle track on a file carries the
+real `forced` flag, it treats a track whose title contains the word `forced`
+(whole word, case-insensitive) as forced. This fallback kicks in **only** for
+files where nothing is properly flagged — if at least one track is correctly
+flagged, the file is considered well-structured and the (often unreliable)
+titles are ignored. The detection feeds both `<lang>-forced` (match forced) and
+bare `<lang>` (prefer non-forced), so the two stay consistent.
+
 ### Script classes
 
 Keys can match the **writing system** of the title's language (content or

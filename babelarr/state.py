@@ -64,10 +64,17 @@ class StatePersistence(Protocol):
     def is_ours(self, item, field: str, current_value: Optional[str]) -> bool:
         """True if ``current_value`` matches the fingerprint we recorded."""
 
-    def record(self, item, field: str, value: str) -> None:
-        """Persist that Babelarr wrote ``value`` to ``field`` on ``item``."""
+    def record(self, item, field: str, value: str, extra_tags=None) -> None:
+        """Persist that Babelarr wrote ``value`` to ``field`` on ``item``.
 
-    def clear(self, item, field: str) -> None:
+        ``extra_tags`` is an optional iterable of label tag strings known to be
+        on the server but possibly absent from ``item.labels`` (e.g. after a
+        reload races Plex's eventual-consistency on label writes). The labels
+        backend folds them into its stale-label self-heal so prior lock labels
+        are reliably removed; other backends ignore it.
+        """
+
+    def clear(self, item, field: str, extra_tags=None) -> None:
         """Remove any recorded value for ``field`` on ``item`` (if present)."""
 
     def flush(self) -> None:
@@ -95,11 +102,11 @@ class LabelState:
         want = label_for(field, current_value).lower()
         return any(t.lower() == want for t in _item_label_tags(item) if t)
 
-    def record(self, item, field: str, value: str) -> None:
+    def record(self, item, field: str, value: str, extra_tags=None) -> None:
         new_label = label_for(field, value)
         new_lc = new_label.lower()
         prefix_lc = label_prefix_for(field).lower()
-        existing = [t for t in _item_label_tags(item) if t]
+        existing = self._known_tags(item, extra_tags)
         # Case-insensitive matching against what Plex actually stored.
         already_present = any(t.lower() == new_lc for t in existing)
         stale = [
@@ -114,13 +121,34 @@ class LabelState:
         if not already_present:
             item.addLabel([new_label], locked=False)
 
-    def clear(self, item, field: str) -> None:
+    def clear(self, item, field: str, extra_tags=None) -> None:
         prefix_lc = label_prefix_for(field).lower()
-        stale = [t for t in _item_label_tags(item)
-                 if t and t.lower().startswith(prefix_lc)]
+        stale = [t for t in self._known_tags(item, extra_tags)
+                 if t.lower().startswith(prefix_lc)]
         if self.dry_run or not stale:
             return
         item.removeLabel(stale, locked=False)
+
+    @staticmethod
+    def _known_tags(item, extra_tags=None) -> list:
+        """Union of the item's current label tags and any ``extra_tags``.
+
+        ``extra_tags`` carries labels known to exist on the server but possibly
+        missing from a freshly-reloaded ``item.labels`` (Plex is
+        eventually-consistent on label writes). Folding them in lets the
+        stale-label self-heal remove prior lock labels reliably. Deduplicated
+        case-insensitively, preserving order.
+        """
+        out = []
+        seen = set()
+        for t in list(_item_label_tags(item)) + list(extra_tags or []):
+            if not t:
+                continue
+            lc = t.lower()
+            if lc not in seen:
+                seen.add(lc)
+                out.append(t)
+        return out
 
     def flush(self) -> None:  # nothing buffered
         return
@@ -181,13 +209,15 @@ class FileState:
             recorded = self._data.get(key, {}).get(field)
         return recorded is not None and recorded == fingerprint(current_value)
 
-    def record(self, item, field: str, value: str) -> None:
+    def record(self, item, field: str, value: str, extra_tags=None) -> None:
+        # extra_tags is a label-backend concern (eventual-consistency healing);
+        # the file backend keys off guids, so it is irrelevant here.
         key = item_guid_key(item)
         with self._lock:
             self._data.setdefault(key, {})[field] = fingerprint(value)
             self._dirty = True
 
-    def clear(self, item, field: str) -> None:
+    def clear(self, item, field: str, extra_tags=None) -> None:
         key = item_guid_key(item)
         with self._lock:
             entry = self._data.get(key)
