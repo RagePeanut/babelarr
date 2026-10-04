@@ -16,9 +16,10 @@ from babelarr.selector import Selection  # noqa: E402
 
 
 class FakeStream:
-    def __init__(self, id, selected=False):
+    def __init__(self, id, selected=False, default=False):
         self.id = id
         self.selected = selected
+        self.default = default
 
 
 class FakePart:
@@ -83,5 +84,56 @@ def test_disable_subs_noop_when_none_selected():
     # No subtitle currently active -> nothing to turn off.
     part = FakePart(subs=[FakeStream(10, selected=False)])
     changed = apply_selection(part, Selection(None, None, True), dry_run=False)
+    assert not changed
+    assert part.calls == []
+
+
+# --- Regression: a file-"default" stream ordered BEFORE the "selected" one ---
+# This is the Akira case: audio 21080 (fr) has default=1 and precedes the
+# actually-selected jpn track 21082. The old `selected or default` + first-match
+# logic resolved "current" to the default id and re-issued a redundant write.
+
+
+def test_no_audio_change_when_default_precedes_selected_target():
+    # Stream 1 is the file default; stream 2 is what's actually selected AND
+    # what the rules want. No write should happen.
+    part = FakePart(audio=[
+        FakeStream(1, selected=False, default=True),
+        FakeStream(2, selected=True),
+    ])
+    changed = apply_selection(part, Selection(2, None, False), dry_run=False)
+    assert not changed
+    assert part.calls == []
+
+
+def test_no_subtitle_change_when_default_precedes_selected_target():
+    # Sub 10 is a forced/default track ordered before the selected full sub 11.
+    part = FakePart(subs=[
+        FakeStream(10, selected=False, default=True),
+        FakeStream(11, selected=True),
+    ])
+    changed = apply_selection(part, Selection(None, 11, False), dry_run=False)
+    assert not changed
+    assert part.calls == []
+
+
+def test_audio_change_still_fires_when_target_differs_from_selected():
+    # Guard against over-correction: if the selected track is NOT the target,
+    # we must still switch. Stream 1 default, stream 2 selected, target 3.
+    part = FakePart(audio=[
+        FakeStream(1, default=True),
+        FakeStream(2, selected=True),
+        FakeStream(3),
+    ])
+    changed = apply_selection(part, Selection(3, None, False), dry_run=False)
+    assert changed
+    assert ("audio", 3) in part.calls
+
+
+def test_falls_back_to_default_when_nothing_selected():
+    # No stream selected at all -> default is the active one. If the default
+    # already matches the target, no write.
+    part = FakePart(audio=[FakeStream(1, default=True), FakeStream(2)])
+    changed = apply_selection(part, Selection(1, None, False), dry_run=False)
     assert not changed
     assert part.calls == []

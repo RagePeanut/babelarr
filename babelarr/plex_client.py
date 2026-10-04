@@ -155,6 +155,29 @@ def _is_active(s) -> bool:
     return bool(getattr(s, "default", False))
 
 
+def _current_stream_id(streams) -> Optional[int]:
+    """Id of the stream currently in effect, or None.
+
+    ``selected`` is what Plex is *actually* using right now; ``default`` is a
+    static flag the muxer baked into the file. A file commonly marks one track
+    ``default`` while the user/Plex plays a *different* ``selected`` track (see
+    Akira: French ``default`` audio vs. the selected Japanese track). So we
+    must look for a ``selected`` stream FIRST across all streams, and only fall
+    back to ``default`` when nothing is selected at all. The old
+    ``selected or default`` + first-match logic returned the file-default id
+    whenever it appeared before the selected one, making the "already correct?"
+    check perpetually false and re-issuing redundant setSelected* writes.
+    """
+    streams = list(streams)
+    for s in streams:
+        if getattr(s, "selected", False):
+            return s.id
+    for s in streams:
+        if getattr(s, "default", False):
+            return s.id
+    return None
+
+
 def _audio_views(part) -> List[AudioStreamView]:
     views = []
     for s in part.audioStreams():
@@ -189,11 +212,7 @@ def apply_selection(part, selection: Selection, dry_run: bool) -> bool:
     changed = False
 
     if selection.audio_stream_id is not None:
-        current = next(
-            (s.id for s in part.audioStreams() if getattr(s, "selected", None)
-             or getattr(s, "default", False)),
-            None,
-        )
+        current = _current_stream_id(part.audioStreams())
         if current != selection.audio_stream_id:
             log.info("  audio -> stream %s%s", selection.audio_stream_id,
                      " (dry-run)" if dry_run else "")
@@ -202,22 +221,14 @@ def apply_selection(part, selection: Selection, dry_run: bool) -> bool:
             changed = True
 
     if selection.disable_subtitles:
-        current = next(
-            (s.id for s in part.subtitleStreams() if getattr(s, "selected", None)
-             or getattr(s, "default", False)),
-            None,
-        )
+        current = _current_stream_id(part.subtitleStreams())
         if current is not None:
             log.info("  subtitles -> OFF%s", " (dry-run)" if dry_run else "")
             if not dry_run:
                 part.resetSelectedSubtitleStream()
             changed = True
     elif selection.subtitle_stream_id is not None:
-        current = next(
-            (s.id for s in part.subtitleStreams() if getattr(s, "selected", None)
-             or getattr(s, "default", False)),
-            None,
-        )
+        current = _current_stream_id(part.subtitleStreams())
         if current != selection.subtitle_stream_id:
             log.info("  subtitles -> stream %s%s", selection.subtitle_stream_id,
                      " (dry-run)" if dry_run else "")
