@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from babelarr.plex_client import apply_poster, apply_title  # noqa: E402
-from babelarr.state import LabelState  # noqa: E402
+from babelarr.state import LabelState, label_for  # noqa: E402
 
 
 class FakeField:
@@ -278,3 +278,67 @@ def test_poster_user_swap_overwritten_when_not_protected():
     changed = apply_poster(item, URL, set(), st, dry_run=False)
     assert changed
     assert item.poster_selects == [URL]    # re-selected our wanted poster
+
+
+# --- regression: duplicate thumb lock after reload drops labels -------------
+
+class EventualConsistencyItem(FakeItem):
+    """A FakeItem that models Plex's eventual-consistency on label writes.
+
+    The *server* holds the true label set (``_server_labels``); add/remove
+    operate on it. A ``reload()`` right after a write can return a view that is
+    MISSING a lock label written on a previous run even though it is still on
+    the server -- so after reload ``labels`` reflects a stale snapshot while the
+    server still carries the old label. If the self-heal reads only the stale
+    snapshot it won't remove the old label, and the server ends up with TWO
+    ``Babelarr-locked:thumb:*`` labels (the Rope bug).
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Server starts in sync with the in-memory snapshot.
+        self._server_labels = list(self._labels)
+        self._reloaded = False
+
+    def addLabel(self, labels, locked=True):
+        for l in labels:
+            if l not in self._server_labels:
+                self._server_labels.append(l)
+            if l not in self._labels:
+                self._labels.append(l)
+
+    def removeLabel(self, labels, locked=True):
+        for l in labels:
+            if l in self._server_labels:
+                self._server_labels.remove(l)
+            if l in self._labels:
+                self._labels.remove(l)
+
+    def reload(self):
+        # First reload after a write drops a previously-written label from the
+        # VIEW (not the server) -> stale snapshot.
+        self._reloaded = True
+        self._labels = []
+
+
+def test_poster_rule_change_does_not_leave_two_thumb_labels():
+    # Run 1 recorded poster URL (one thumb label, on the server). Run 2's rule
+    # wants URL2. The reload returns a stale (empty) label view, but the old URL
+    # thumb label is STILL on the server. The fix passes pre-reload tags so the
+    # self-heal removes it, leaving exactly ONE thumb label on the server.
+    sel = FakePoster(URL, selected=True)
+    item = EventualConsistencyItem(
+        poster_locked=True, candidates=[sel, FakePoster(URL2)]
+    )
+    st = LabelState()
+    _record_poster(st, item, URL, URL)   # prior-run state: thumb=URL, url=URL
+
+    changed = apply_poster(item, URL2, {"poster"}, st, dry_run=False)
+    assert changed
+    assert item.poster_selects == [URL2]
+
+    # Inspect the SERVER's label set (the source of truth).
+    thumbs = [t for t in item._server_labels
+              if t.lower().startswith("babelarr-locked:thumb:")]
+    assert len(thumbs) == 1, thumbs            # not two -> the bug is fixed
+    assert thumbs[0] == label_for("thumb", URL2)  # and it's the NEW poster's
