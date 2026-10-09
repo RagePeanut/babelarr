@@ -394,8 +394,9 @@ So each entry you list is resolved against an **alias set**:
 * **Any other value** is honored **literally** — it matches only itself. So an
   unmapped format works right away; you don't have to wait for it to be added.
 
-Current canonical names (each pulling in its aliases): `srt`, `ass`/`ssa`,
-`vtt`, `mov_text`, `smi`, `pgs`, `vobsub`, `dvb`, `xsub`. This table lives in
+Current canonical names (each pulling in its aliases): `srt` (`subrip`), `ass`
+(`ssa`), `vtt` (`webvtt`), `mov_text`, `smi`, `pgs` (`hdmv_pgs_subtitle`),
+`vobsub` (`dvd_subtitle`), `dvb`, `xsub`. This table lives in
 [`babelarr/subformats.py`](babelarr/subformats.py) and is deliberately **not**
 exhaustive — if you hit a spelling that a canonical name should cover, adding it
 there (so the friendly name matches it too) is a welcome, easy contribution.

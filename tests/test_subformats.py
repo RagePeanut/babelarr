@@ -17,6 +17,17 @@ def test_srt_matches_subrip():
     assert "srt" in s and "subrip" in s
 
 
+def test_ass_is_canonical_and_matches_ssa():
+    assert "ass" in canonical_names()
+    s = match_set("ass")
+    assert "ass" in s and "ssa" in s
+
+
+def test_ssa_entry_is_literal_only():
+    # ssa is an alias of ass, not its own canonical -> matches only itself.
+    assert match_set("ssa") == frozenset({"ssa"})
+
+
 def test_pgs_matches_hdmv():
     assert "hdmv_pgs_subtitle" in match_set("pgs")
 

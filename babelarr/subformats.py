@@ -29,8 +29,10 @@ from typing import Dict, FrozenSet, Set
 _ALIASES: Dict[str, Set[str]] = {
     # --- text-based -------------------------------------------------------
     "srt": {"subrip"},
-    "ass": {"ssa"},  # SubStation Alpha; ffmpeg often reports ASS files as "ass"
-    "ssa": {"ass"},  # ...and vice-versa, so treat them as mutual aliases
+    # ASS (Advanced SubStation Alpha) is the superset of the older SSA; ffmpeg
+    # reports both under either spelling, so treat them as one family keyed on
+    # the canonical "ass".
+    "ass": {"ssa"},
     "vtt": {"webvtt"},
     "mov_text": {"tx3g", "text"},  # MP4 / 3GPP timed text
     "smi": {"sami"},
