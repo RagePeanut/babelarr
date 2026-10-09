@@ -355,6 +355,33 @@ when no default is marked). This means a native dub automatically gets the
 subtitle rule for the dub's language. First available preference wins; `off`
 forces subtitles off. Misses leave subtitles untouched.
 
+#### Codec priority (`SUBTITLE_CODEC_PRIORITY`)
+
+When a matched preference has **several tracks of the same language** (and the
+same forced/non-forced kind), `SUBTITLE_CODEC_PRIORITY` breaks the tie. It is a
+comma-separated, **ordered** list of subtitle codecs — earlier = more preferred:
+
+```
+# Prefer text SRT, then ASS, then image-based PGS:
+SUBTITLE_CODEC_PRIORITY=srt,ass,pgs
+```
+
+Rules:
+* Codecs **listed** win in the order given.
+* Codecs **not listed** are considered **last**.
+* If several candidates are all unlisted (or tie), the **first one encountered**
+  wins — i.e. the historical behavior.
+* Matching is case-insensitive against the codec Plex reports for the stream.
+
+Leave it unset to keep the previous behavior (first matching track wins,
+regardless of codec).
+
+Common codec values Plex reports: `srt` (SubRip), `ass` / `ssa` (SubStation
+Alpha), `webvtt` (WebVTT), `mov_text` (MP4 timed text), `pgs`
+(`hdmv_pgs_subtitle`, Blu-ray image subs), `vobsub` (`dvd_subtitle`, DVD image
+subs). Use whatever value Plex shows for your tracks; unknown values simply fall
+into the "not listed → last" bucket.
+
 ### Posters — `POSTER_RULES`
 
 Keyed by the title's **production language** (TMDB `original_language`).
@@ -454,6 +481,7 @@ come from a config file and/or `*_RULES` env vars — see
 | `STATE_PERSISTENCE` | — (**required** if poster/title rules used) | How Babelarr remembers its own values: `file` or `labels`. No default. |
 | `STATE_FILE` | `/config/babelarr-state.json` | Path to the JSON state file (only used when `STATE_PERSISTENCE=file`). |
 | `MAX_AUDIO_CHANNELS` | *(unset = no cap)* | Ceiling on audio channels (e.g. `6` = 5.1). |
+| `SUBTITLE_CODEC_PRIORITY` | *(unset = first match wins)* | Ordered, comma-separated subtitle codec preference (e.g. `srt,ass,pgs`) to break ties between same-language tracks. Unlisted codecs sort last. See [Codec priority](#codec-priority-subtitle_codec_priority). |
 | `PLEX_TIMEOUT` | `120` | Per-request Plex read timeout (seconds). Raise it if large libraries time out. |
 | `PLEX_RETRIES` | `3` | Attempts for transient Plex failures (library/episode enumeration) before skipping, with exponential backoff. |
 | `SWEEP_INTERVAL_MINUTES` | `360` | Cadence of the always-on full-library sweep. |

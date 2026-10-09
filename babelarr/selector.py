@@ -47,6 +47,7 @@ class SubtitleStreamView:
     language_code: Optional[str]
     is_default: bool = False
     forced: bool = False
+    codec: Optional[str] = None  # subtitle format: srt, ass, pgs, vobsub, …
 
 
 @dataclass(frozen=True)
@@ -131,10 +132,36 @@ def select_audio(
     return None  # matched rule, nothing available -> untouched
 
 
+def _format_rank(codec: Optional[str], format_priority: Sequence[str]) -> int:
+    """Position of a subtitle's format in ``format_priority`` (lower = better).
+
+    Formats not listed sort *after* every listed one; among equally-ranked
+    tracks the original (first-encountered) order is preserved by the caller's
+    stable sort, so "the first encountered wins".
+    """
+    if not format_priority:
+        return 0
+    norm = (codec or "").strip().lower()
+    try:
+        return format_priority.index(norm)
+    except ValueError:
+        return len(format_priority)
+
+
+def _prefer_by_format(
+    candidates: Sequence[SubtitleStreamView], format_priority: Sequence[str]
+) -> List[SubtitleStreamView]:
+    """Stable-sort subtitle candidates by format priority (no-op if unset)."""
+    if not format_priority:
+        return list(candidates)
+    return sorted(candidates, key=lambda s: _format_rank(s.codec, format_priority))
+
+
 def select_subtitle(
     subtitles: Sequence[SubtitleStreamView],
     audio_language: Optional[str],
     rules: RuleSet,
+    format_priority: Optional[Sequence[str]] = None,
 ) -> Selection:
     """Decide the subtitle stream given the chosen audio language and rules.
 
@@ -142,7 +169,13 @@ def select_subtitle(
     preference is a concrete subtitle language; ``off`` forces subtitles off.
     (Subtitles have no ``original`` token: with rules keyed on the played audio,
     concrete language keys plus ``default`` already cover every case.)
+
+    When several tracks tie on language (and forced-ness), ``format_priority``
+    -- an ordered list of subtitle formats (``srt``, ``ass``, ``pgs``, …) --
+    breaks the tie: earlier formats win, unlisted formats come last, and ties
+    among unlisted formats keep the first-encountered track.
     """
+    format_priority = format_priority or []
     prefs = rules.match(audio_language)
     if prefs is None:
         return Selection(None, None, disable_subtitles=False)  # untouched
@@ -162,12 +195,13 @@ def select_subtitle(
             forced = [s for s in candidates if s.forced]
             if not forced:
                 continue
-            chosen = forced[0]
+            chosen = _prefer_by_format(forced, format_priority)[0]
         else:
             # Bare ``<lang>``: prefer a full/non-forced track, fall back to a
             # forced one only if that's all there is (historical behavior).
             non_forced = [s for s in candidates if not s.forced]
-            chosen = non_forced[0] if non_forced else candidates[0]
+            pool = non_forced if non_forced else candidates
+            chosen = _prefer_by_format(pool, format_priority)[0]
         return Selection(None, chosen.id, disable_subtitles=False)
 
     # Matched rule but nothing available -> leave untouched (Plex handles it).
@@ -181,6 +215,7 @@ def select_for_part(
     audio_rules: RuleSet,
     subtitle_rules: RuleSet,
     max_channels: Optional[int],
+    subtitle_format_priority: Optional[Sequence[str]] = None,
 ) -> Selection:
     """Full audio+subtitle selection for a single media part.
 
@@ -203,7 +238,9 @@ def select_for_part(
         if playing_lang is None:
             playing_lang = original_language
 
-    sub_sel = select_subtitle(subtitles, playing_lang, subtitle_rules)
+    sub_sel = select_subtitle(
+        subtitles, playing_lang, subtitle_rules, subtitle_format_priority
+    )
     return Selection(
         audio_stream_id=audio_id,
         subtitle_stream_id=sub_sel.subtitle_stream_id,

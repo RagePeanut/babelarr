@@ -49,11 +49,13 @@ def main() -> int:
 
     log.info(
         "Babelarr starting (mode=%s, sweep=%dm, dry_run=%s, max_channels=%s, "
-        "skip_user_locked=%s, state=%s, plex_timeout=%ds, plex_retries=%d)",
+        "sub_codec_priority=%s, skip_user_locked=%s, state=%s, "
+        "plex_timeout=%ds, plex_retries=%d)",
         config.new_media_mode,
         config.sweep_interval_minutes,
         config.dry_run,
         config.max_audio_channels,
+        ",".join(config.subtitle_format_priority) or "none",
         ",".join(sorted(config.skip_user_locked)) or "none",
         config.state_persistence or "n/a (no poster/title rules)",
         config.plex_timeout,

@@ -222,6 +222,7 @@ class Processor:
                         audio_rules=self.config.audio_rules,
                         subtitle_rules=self.config.subtitle_rules,
                         max_channels=self.config.max_audio_channels,
+                        subtitle_format_priority=self.config.subtitle_format_priority,
                     )
                     apply_selection(part, selection, self.config.dry_run)
                 except Exception:  # pragma: no cover - defensive
