@@ -30,6 +30,7 @@ from typing import List, Optional, Sequence
 
 from .langcodes import is_no_language, normalize
 from .rules import RuleSet, TOKEN_OFF, TOKEN_ORIGINAL
+from .subformats import match_set
 
 
 @dataclass(frozen=True)
@@ -135,17 +136,21 @@ def select_audio(
 def _format_rank(codec: Optional[str], format_priority: Sequence[str]) -> int:
     """Position of a subtitle's format in ``format_priority`` (lower = better).
 
-    Formats not listed sort *after* every listed one; among equally-ranked
-    tracks the original (first-encountered) order is preserved by the caller's
-    stable sort, so "the first encountered wins".
+    Each entry in ``format_priority`` matches a *set* of raw codec strings (a
+    canonical name expands to all its aliases; an unmapped value matches only
+    itself -- see :mod:`.subformats`). A stream ranks by the first entry whose
+    match-set contains its codec. Formats matched by no entry sort *after* every
+    listed one; among equally-ranked tracks the original (first-encountered)
+    order is preserved by the caller's stable sort, so "the first encountered
+    wins".
     """
     if not format_priority:
         return 0
     norm = (codec or "").strip().lower()
-    try:
-        return format_priority.index(norm)
-    except ValueError:
-        return len(format_priority)
+    for i, entry in enumerate(format_priority):
+        if norm in match_set(entry):
+            return i
+    return len(format_priority)
 
 
 def _prefer_by_format(

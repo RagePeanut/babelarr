@@ -164,6 +164,33 @@ def test_codec_priority_unset_keeps_first_encountered():
     assert sel.subtitle_stream_id == 10  # no priority -> historical behavior
 
 
+def test_codec_priority_canonical_matches_alias():
+    # Listing "srt" must also match a stream reported as "subrip".
+    rules = _subs("default:fre")
+    subs = [_sub(10, "fre", codec="pgs"), _sub(11, "fre", codec="subrip")]
+    sel = select_subtitle(subs, "eng", rules, format_priority=["srt", "pgs"])
+    assert sel.subtitle_stream_id == 11
+
+
+def test_codec_priority_pgs_alias_hdmv():
+    # "pgs" matches the ffmpeg spelling "hdmv_pgs_subtitle".
+    rules = _subs("default:fre")
+    subs = [
+        _sub(10, "fre", codec="hdmv_pgs_subtitle"),
+        _sub(11, "fre", codec="subrip"),
+    ]
+    sel = select_subtitle(subs, "eng", rules, format_priority=["pgs", "srt"])
+    assert sel.subtitle_stream_id == 10
+
+
+def test_codec_priority_literal_unmapped_value_still_works():
+    # An unmapped raw value is honored literally (matches only itself).
+    rules = _subs("default:fre")
+    subs = [_sub(10, "fre", codec="weirdsub"), _sub(11, "fre", codec="srt")]
+    sel = select_subtitle(subs, "eng", rules, format_priority=["weirdsub"])
+    assert sel.subtitle_stream_id == 10
+
+
 def test_english_audio_french_subs_present():
     rules = _subs("eng:fre;default:fre,eng")
     subs = [_sub(10, "fre"), _sub(11, "eng")]
