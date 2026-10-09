@@ -215,6 +215,7 @@ class Config:
     poster_rules: RuleSet
     title_rules: RuleSet
     max_audio_channels: Optional[int]
+    subtitle_format_priority: List[str]  # ordered formats; [] = no preference
     skip_user_locked: set  # subset of {"poster", "title"}
     state_persistence: str  # "labels" | "file"
     state_file: str
@@ -260,6 +261,11 @@ class Config:
         if max_channels is not None and max_channels < 1:
             raise ConfigError("MAX_AUDIO_CHANNELS must be >= 1 when set")
 
+        sub_fmt_raw = os.environ.get("SUBTITLE_CODEC_PRIORITY", "").strip()
+        subtitle_format_priority = [
+            f.strip().lower() for f in sub_fmt_raw.split(",") if f.strip()
+        ]
+
         plex_timeout = _env_int("PLEX_TIMEOUT", 120)
         if plex_timeout < 1:
             raise ConfigError("PLEX_TIMEOUT must be >= 1 (seconds)")
@@ -293,6 +299,7 @@ class Config:
             poster_rules=rules["poster"],
             title_rules=rules["title"],
             max_audio_channels=max_channels,
+            subtitle_format_priority=subtitle_format_priority,
             skip_user_locked=_parse_skip_user_locked(
                 os.environ.get("SKIP_USER_LOCKED")
             ),

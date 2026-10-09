@@ -355,6 +355,60 @@ when no default is marked). This means a native dub automatically gets the
 subtitle rule for the dub's language. First available preference wins; `off`
 forces subtitles off. Misses leave subtitles untouched.
 
+#### Codec priority (`SUBTITLE_CODEC_PRIORITY`)
+
+When a matched preference has **several tracks of the same language** (and the
+same forced/non-forced kind), `SUBTITLE_CODEC_PRIORITY` breaks the tie. It is a
+comma-separated, **ordered** list of subtitle codecs — earlier = more preferred:
+
+```
+# Prefer text SRT, then ASS, then image-based PGS:
+SUBTITLE_CODEC_PRIORITY=srt,ass,pgs
+```
+
+Rules:
+* Codecs **listed** win in the order given.
+* Codecs **not listed** are considered **last**.
+* If several candidates are all unlisted (or tie), the **first one encountered**
+  wins — i.e. the historical behavior.
+* Matching is case-insensitive against the codec Plex reports for the stream.
+
+Leave it unset to keep the previous behavior (first matching track wins,
+regardless of codec).
+
+**Format names and aliases.** Plex has **no fixed, enumerated list** of subtitle
+codec strings: the value exposed on a stream (its
+[`format`](https://python-plexapi.readthedocs.io/en/stable/modules/media.html#plexapi.media.SubtitleStream),
+falling back to the generic
+[`codec`](https://python-plexapi.readthedocs.io/en/stable/modules/media.html#plexapi.media.MediaPartStream))
+is whatever its demuxer (ffmpeg) reports — and the *same* human format shows up
+under several spellings depending on the source. SubRip is `srt` **or**
+`subrip`; Blu-ray PGS is `pgs` **or** `hdmv_pgs_subtitle`; DVD VobSub is
+`vobsub` **or** `dvd_subtitle`.
+
+So each entry you list is resolved against an **alias set**:
+
+* A **canonical name** matches every known spelling of that format. Listing
+  `srt` matches `srt` *and* `subrip`; `pgs` matches `pgs` *and*
+  `hdmv_pgs_subtitle`; `vobsub` matches `vobsub`, `dvd_subtitle`, `dvdsub`.
+* **Any other value** is honored **literally** — it matches only itself. So an
+  unmapped format works right away; you don't have to wait for it to be added.
+
+Current canonical names (each pulling in its aliases): `srt` (`subrip`), `ass`
+(`ssa`), `vtt` (`webvtt`), `mov_text`, `smi`, `pgs` (`hdmv_pgs_subtitle`),
+`vobsub` (`dvd_subtitle`), `dvb`, `xsub`. This table lives in
+[`babelarr/subformats.py`](babelarr/subformats.py) and is deliberately **not**
+exhaustive — if you hit a spelling that a canonical name should cover, adding it
+there (so the friendly name matches it too) is a welcome, easy contribution.
+
+Not sure what your files report? Read it straight off your library with
+[python-plexapi](https://python-plexapi.readthedocs.io/):
+
+```python
+for s in part.subtitleStreams():
+    print(s.languageCode, s.format or s.codec)   # e.g. "fre srt", "fre pgs"
+```
+
 ### Posters — `POSTER_RULES`
 
 Keyed by the title's **production language** (TMDB `original_language`).
@@ -454,6 +508,7 @@ come from a config file and/or `*_RULES` env vars — see
 | `STATE_PERSISTENCE` | — (**required** if poster/title rules used) | How Babelarr remembers its own values: `file` or `labels`. No default. |
 | `STATE_FILE` | `/config/babelarr-state.json` | Path to the JSON state file (only used when `STATE_PERSISTENCE=file`). |
 | `MAX_AUDIO_CHANNELS` | *(unset = no cap)* | Ceiling on audio channels (e.g. `6` = 5.1). |
+| `SUBTITLE_CODEC_PRIORITY` | *(unset = first match wins)* | Ordered, comma-separated subtitle codec preference (e.g. `srt,ass,pgs`) to break ties between same-language tracks. Canonical names match all known alias spellings (e.g. `srt` also matches `subrip`); any other value matches literally. Unlisted codecs sort last. See [Codec priority](#codec-priority-subtitle_codec_priority). |
 | `PLEX_TIMEOUT` | `120` | Per-request Plex read timeout (seconds). Raise it if large libraries time out. |
 | `PLEX_RETRIES` | `3` | Attempts for transient Plex failures (library/episode enumeration) before skipping, with exponential backoff. |
 | `SWEEP_INTERVAL_MINUTES` | `360` | Cadence of the always-on full-library sweep. |

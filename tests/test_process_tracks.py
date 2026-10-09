@@ -80,6 +80,7 @@ def _processor():
         audio_rules = parse_inline("default:original", AUDIO_TOKENS)
         subtitle_rules = parse_inline("jpn:off;default:fre", SUBTITLE_TOKENS)
         max_audio_channels = None
+        subtitle_format_priority = []
         dry_run = False
     p.config = Cfg()
     return p
