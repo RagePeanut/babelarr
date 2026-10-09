@@ -376,11 +376,29 @@ Rules:
 Leave it unset to keep the previous behavior (first matching track wins,
 regardless of codec).
 
-Common codec values Plex reports: `srt` (SubRip), `ass` / `ssa` (SubStation
-Alpha), `webvtt` (WebVTT), `mov_text` (MP4 timed text), `pgs`
-(`hdmv_pgs_subtitle`, Blu-ray image subs), `vobsub` (`dvd_subtitle`, DVD image
-subs). Use whatever value Plex shows for your tracks; unknown values simply fall
-into the "not listed → last" bucket.
+**What values to use.** There is **no fixed, enumerated list** of subtitle codec
+strings. The value Plex exposes for a subtitle stream is whatever its demuxer
+(ffmpeg) reports — Plex's own docs note there is no master reference list of
+supported subtitle formats. Babelarr matches against the subtitle stream's
+[`format`](https://python-plexapi.readthedocs.io/en/stable/modules/media.html#plexapi.media.SubtitleStream)
+field (e.g. `srt`), falling back to the generic
+[`codec`](https://python-plexapi.readthedocs.io/en/stable/modules/media.html#plexapi.media.MediaPartStream)
+string.
+
+So rather than copying a list that may not match your files, **read the actual
+value off your own library** and use exactly that. For example, with
+[python-plexapi](https://python-plexapi.readthedocs.io/):
+
+```python
+for s in part.subtitleStreams():
+    print(s.languageCode, s.format or s.codec)   # e.g. "fre srt", "fre pgs"
+```
+
+Typical values you'll see are text formats like `srt`, `ass`/`ssa`, `webvtt`,
+`mov_text`, and image formats like `pgs` and `vobsub` — but treat those as
+examples, not a closed set. Any value you list that doesn't appear on a track
+is simply never matched; any codec you *don't* list falls into the
+"not listed → last" bucket.
 
 ### Posters — `POSTER_RULES`
 
@@ -481,7 +499,7 @@ come from a config file and/or `*_RULES` env vars — see
 | `STATE_PERSISTENCE` | — (**required** if poster/title rules used) | How Babelarr remembers its own values: `file` or `labels`. No default. |
 | `STATE_FILE` | `/config/babelarr-state.json` | Path to the JSON state file (only used when `STATE_PERSISTENCE=file`). |
 | `MAX_AUDIO_CHANNELS` | *(unset = no cap)* | Ceiling on audio channels (e.g. `6` = 5.1). |
-| `SUBTITLE_CODEC_PRIORITY` | *(unset = first match wins)* | Ordered, comma-separated subtitle codec preference (e.g. `srt,ass,pgs`) to break ties between same-language tracks. Unlisted codecs sort last. See [Codec priority](#codec-priority-subtitle_codec_priority). |
+| `SUBTITLE_CODEC_PRIORITY` | *(unset = first match wins)* | Ordered, comma-separated subtitle codec preference (e.g. `srt,ass,pgs`) to break ties between same-language tracks. Values match the stream's `format`/`codec` as Plex reports it (no fixed list — read your own library). Unlisted codecs sort last. See [Codec priority](#codec-priority-subtitle_codec_priority). |
 | `PLEX_TIMEOUT` | `120` | Per-request Plex read timeout (seconds). Raise it if large libraries time out. |
 | `PLEX_RETRIES` | `3` | Attempts for transient Plex failures (library/episode enumeration) before skipping, with exponential backoff. |
 | `SWEEP_INTERVAL_MINUTES` | `360` | Cadence of the always-on full-library sweep. |

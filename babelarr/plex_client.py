@@ -237,7 +237,9 @@ def _subtitle_views(part) -> List[SubtitleStreamView]:
                 language_code=getattr(s, "languageCode", None) or getattr(s, "language", None),
                 is_default=_is_active(s),
                 forced=forced,
-                codec=getattr(s, "codec", None),
+                # Prefer the subtitle-specific ``format`` (ex: "srt"); fall back
+                # to the generic stream ``codec`` when ``format`` is absent.
+                codec=getattr(s, "format", None) or getattr(s, "codec", None),
             )
         )
     return views
