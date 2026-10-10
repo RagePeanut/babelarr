@@ -462,28 +462,14 @@ Preferences are logo languages; `original` resolves to that production language,
 `textless` matches TMDB's no-language logos, and `off` **clears the logo
 entirely** so Plex falls back to the text title. Among candidates for a given
 preference, the highest-voted logo on TMDB is chosen; if it is already one of
-the item's logo candidates it is **selected**, otherwise **uploaded**. Babelarr
-fingerprints the result, so it recognizes its own logo and won't re-apply every
-sweep.
+the item's logo candidates it is **selected**, otherwise **uploaded**. When
+Babelarr sets (or clears) a logo it **locks** the field so Plex's agent won't
+re-pick one, and fingerprints the result (same ownership model as posters).
 
 Like every concern, a logo rule only ever acts on what it explicitly matches:
 if the matched preference list has no available logo on TMDB, or no rule matches
 the title at all, the logo is **left exactly as Plex has it** — Babelarr adds no
 behavior of its own beyond the languages you list.
-
-> **Plex can't *lock* the logo field.** Unlike posters/titles/backdrops, Plex
-> rejects locking `clearLogo` (the metadata edit returns HTTP 400 — the field
-> simply has no lock mechanism). A logo you set still **sticks**, and Babelarr
-> uses its own fingerprint state to avoid re-applying each sweep — but there are
-> two consequences you should know:
-> * Babelarr can't lock the logo, so a later **metadata refresh** could let
->   Plex's agent re-pick one. The next scheduled sweep re-applies your rule, so
->   it self-corrects; use `websocket` [new-media mode](#new-media-handling-new_media_mode)
->   if you want re-matches handled promptly.
-> * Because the field can't be locked, `SKIP_USER_LOCKED` **can't protect a
->   hand-picked logo** the way it does posters/titles — Plex exposes no reliable
->   "the user locked this" signal for logos. If you've enabled `LOGO_RULES`,
->   treat the logo as Babelarr-managed.
 
 ```
 # Prefer the English logo, else the original-language one
@@ -510,11 +496,10 @@ BACKDROP_RULES=default:textless,original
 
 ### Protecting hand-picked artwork/titles — `SKIP_USER_LOCKED` + state
 
-When Babelarr sets a poster, title or backdrop it **locks** the Plex field (so
-Plex's agent won't revert it) and records a **fingerprint** of what it set. On
-later runs it compares to tell *its own* value apart from one **you** set by
-hand. (Logos are the exception — Plex can't lock `clearLogo`; see the note at
-the end of this section.)
+When Babelarr sets a poster, title, logo or backdrop it **locks** the Plex field
+(so Plex's agent won't revert it) and records a **fingerprint** of what it set.
+On later runs it compares to tell *its own* value apart from one **you** set by
+hand:
 
 * **Titles** fingerprint the title *string*. So Babelarr recognizes its own
   title (and won't rewrite it needlessly), and if you change `TITLE_RULES` the
@@ -545,13 +530,6 @@ Babelarr never set it) is treated as **user-owned**.
 
 (Babelarr's *own* locked fields are always re-manageable regardless — this guard
 only concerns fields **you** locked.)
-
-> **`logo` protection is best-effort.** Plex rejects locking the `clearLogo`
-> field (HTTP 400 — it has no lock mechanism), so there's no "user locked this
-> logo" signal to honor. Babelarr still fingerprints its own logo (so it won't
-> re-apply needlessly), but it **cannot reliably detect a hand-picked logo** —
-> so listing `logo` in `SKIP_USER_LOCKED` has no real effect. If you enable
-> `LOGO_RULES`, treat the logo as Babelarr-managed.
 
 #### `STATE_PERSISTENCE` — how Babelarr remembers its own values (**required**)
 

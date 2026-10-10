@@ -343,10 +343,10 @@ class _ImageConcern:
     """Method/field names binding the generic image logic to one Plex concern."""
 
     __slots__ = ("field", "url_field", "skip_key", "candidates", "set", "upload",
-                 "lock", "delete", "lock_optional")
+                 "lock", "delete")
 
     def __init__(self, field, url_field, skip_key, candidates, set_, upload, lock,
-                 delete, lock_optional=False):
+                 delete):
         self.field = field          # lock field name, e.g. "thumb" / "clearLogo"
         self.url_field = url_field  # secondary state slot for uploads
         self.skip_key = skip_key    # SKIP_USER_LOCKED key, e.g. "poster"
@@ -355,11 +355,6 @@ class _ImageConcern:
         self.upload = upload        # method name to upload from a URL
         self.lock = lock            # method name to lock the field
         self.delete = delete        # method name to clear the image (or None)
-        # Some Plex fields can't be locked via the metadata edit endpoint. For
-        # `clearLogo`, `<field>.locked=1` returns HTTP 400 (the field has no
-        # lock mechanism; Plex keeps a user-set logo without one). When True we
-        # TOLERATE a lock failure instead of letting it abort the apply.
-        self.lock_optional = lock_optional
 
 
 _POSTER_CONCERN = _ImageConcern(
@@ -370,31 +365,13 @@ _POSTER_CONCERN = _ImageConcern(
 _LOGO_CONCERN = _ImageConcern(
     field=_FIELD_LOGO, url_field=_FIELD_LOGO_URL, skip_key="logo",
     candidates="logos", set_="setLogo", upload="uploadLogo",
-    lock="lockLogo", delete="deleteLogo", lock_optional=True,
+    lock="lockLogo", delete="deleteLogo",
 )
 _ART_CONCERN = _ImageConcern(
     field=_FIELD_ART, url_field=_FIELD_ART_URL, skip_key="backdrop",
     candidates="arts", set_="setArt", upload="uploadArt",
     lock="lockArt", delete="deleteArt",
 )
-
-
-def _try_lock(item, concern: _ImageConcern) -> None:
-    """Lock the concern's field, tolerating a failure when lock is optional.
-
-    Plex rejects locking some newer fields (notably ``clearLogo``) with HTTP
-    400 -- the field simply has no lock mechanism, yet a user-/API-set image
-    still sticks without one. For such concerns (``lock_optional``) a failed
-    lock is logged and swallowed so the apply still records its state (and so
-    does not re-upload every sweep). For lockable concerns the error propagates.
-    """
-    try:
-        getattr(item, concern.lock)()
-    except Exception:
-        if not concern.lock_optional:
-            raise
-        log.debug("  %s field not lockable on this Plex server (ignored) for %s",
-                  concern.field, getattr(item, "title", "?"))
 
 
 def _find_existing_image(item, concern: _ImageConcern, image_url):
@@ -473,7 +450,7 @@ def _apply_image_off(item, concern: _ImageConcern, skip_user_locked, state,
             log.exception("  could not clear %s for %s", concern.skip_key,
                           getattr(item, "title", "?"))
             return False
-    _try_lock(item, concern)  # lock so the agent won't re-pick one (if lockable)
+    getattr(item, concern.lock)()  # lock so the agent won't re-pick one
     try:
         item.reload()
     except Exception:  # pragma: no cover - defensive
@@ -546,7 +523,7 @@ def _apply_image(item, concern: _ImageConcern, image_url, skip_user_locked, stat
         getattr(item, concern.set)(existing)
     else:
         getattr(item, concern.upload)(url=image_url)
-    _try_lock(item, concern)
+    getattr(item, concern.lock)()
     try:
         item.reload()
     except Exception:  # pragma: no cover - defensive

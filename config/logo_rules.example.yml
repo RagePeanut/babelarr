@@ -13,12 +13,6 @@
 # is set only if TMDB has one in a language your rule accepts; if not, or if no
 # rule matches the title, the logo is LEFT AS PLEX HAS IT.
 #
-# NOTE: Plex can't LOCK the clearLogo field (locking it returns HTTP 400), so
-# unlike posters/titles the logo isn't lock-protected: a metadata refresh could
-# let Plex re-pick one (the next sweep re-applies your rule), and
-# SKIP_USER_LOCKED can't protect a hand-picked logo. Treat the logo as
-# Babelarr-managed once LOGO_RULES is set.
-#
 # Rules are an ORDERED list, evaluated TOP TO BOTTOM, first match wins (see the
 # subtitle example for the full semantics). Each key is a title's PRODUCTION
 # (original) language, a script class, or `default`. The value is an ordered
