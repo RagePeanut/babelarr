@@ -1,31 +1,35 @@
 """Configuration loading.
 
-Babelarr drives four independent, opt-in concerns off each title's TMDB
-original language:
+Babelarr drives six independent, opt-in concerns off each title's TMDB
+language:
 
   * ``audio``     — which audio track (language) to default to.
   * ``subtitles`` — which subtitle track to enable (or force OFF).
   * ``poster``    — which language's poster (or a textless one) to set.
   * ``title``     — which language's title (or the original) to set.
+  * ``logo``      — which language's logo/clearLogo (or a textless one) to set,
+                    or ``off`` to clear it so the text title shows.
+  * ``backdrop``  — which language's backdrop/art (or a textless one) to set.
 
 Rules can be supplied two ways:
 
   1. A unified **config file** (YAML) with top-level keys ``audio``,
-     ``subtitles``, ``poster`` and ``title``, pointed at by ``CONFIG_FILE``
-     (default ``/config/babelarr.yml`` if present).
+     ``subtitles``, ``poster``, ``title``, ``logo`` and ``backdrop``, pointed at
+     by ``CONFIG_FILE`` (default ``/config/babelarr.yml`` if present).
   2. Per-concern **environment variables** ``AUDIO_RULES``, ``SUBTITLES_RULES``,
-     ``POSTER_RULES``, ``TITLE_RULES`` — each an inline string or a path to a
-     standalone YAML file.
+     ``POSTER_RULES``, ``TITLE_RULES``, ``LOGO_RULES``, ``BACKDROP_RULES`` —
+     each an inline string or a path to a standalone YAML file.
 
 **Precedence:** an environment variable, when set, **overrides** that concern's
 section in the config file. Each concern is independent; a concern with no rules
-from either source is simply left untouched. At least one concern must be
-configured (from either source), or startup fails.
+from either source is simply left untouched (the default for every concern is
+"don't touch Plex"). At least one concern must be configured (from either
+source), or startup fails.
 
-Poster/title changes are protected by ``SKIP_USER_LOCKED`` plus a fingerprint
-state recorded via ``STATE_PERSISTENCE`` (``file`` or ``labels``) — see
-``state.py``. ``STATE_PERSISTENCE`` is required only when poster or title rules
-are in use.
+Poster/title/logo/backdrop changes are protected by ``SKIP_USER_LOCKED`` plus a
+fingerprint state recorded via ``STATE_PERSISTENCE`` (``file`` or ``labels``) —
+see ``state.py``. ``STATE_PERSISTENCE`` is required only when one of those
+field-locking concerns is in use.
 """
 
 from __future__ import annotations
@@ -56,12 +60,16 @@ AUDIO_TOKENS = {TOKEN_ORIGINAL}
 SUBTITLE_TOKENS = {TOKEN_OFF}
 POSTER_TOKENS = {TOKEN_ORIGINAL, TOKEN_TEXTLESS}
 TITLE_TOKENS = {TOKEN_ORIGINAL}
+# Logos additionally accept ``off`` -> clear the logo so Plex falls back to the
+# text title. Backdrops mirror posters (no ``off``).
+LOGO_TOKENS = {TOKEN_ORIGINAL, TOKEN_TEXTLESS, TOKEN_OFF}
+BACKDROP_TOKENS = {TOKEN_ORIGINAL, TOKEN_TEXTLESS}
 
 DEFAULT_CONFIG_PATH = "/config/babelarr.yml"
 DEFAULT_STATE_FILE = "/config/babelarr-state.json"
 
 # Lockable field types that SKIP_USER_LOCKED can protect.
-LOCKABLE_FIELDS = ("poster", "title")
+LOCKABLE_FIELDS = ("poster", "title", "logo", "backdrop")
 
 # concern name -> (env var, config-file key, allowed tokens, allow_forced)
 # ``allow_forced`` enables the ``<lang>-forced`` subtitle modifier; only
@@ -71,6 +79,8 @@ _CONCERNS = {
     "subtitles": ("SUBTITLES_RULES", "subtitles", SUBTITLE_TOKENS, True),
     "poster": ("POSTER_RULES", "poster", POSTER_TOKENS, False),
     "title": ("TITLE_RULES", "title", TITLE_TOKENS, False),
+    "logo": ("LOGO_RULES", "logo", LOGO_TOKENS, False),
+    "backdrop": ("BACKDROP_RULES", "backdrop", BACKDROP_TOKENS, False),
 }
 
 
@@ -160,9 +170,11 @@ def _parse_skip_user_locked(raw: Optional[str]) -> set:
     """Parse SKIP_USER_LOCKED into a set of protected field types.
 
     Values (comma-separated, case-insensitive):
-      * ``true`` / ``all``       -> protect both (poster + title)  [default]
-      * ``false`` / ``none``     -> protect neither
-      * ``poster`` / ``title``   -> protect only those listed
+      * ``true`` / ``all``       -> protect all (poster, title, logo, backdrop)
+                                     [default]
+      * ``false`` / ``none``     -> protect none
+      * ``poster`` / ``title`` / ``logo`` / ``backdrop`` -> protect only those
+                                     listed (comma-separated)
     """
     if raw is None or raw.strip() == "":
         return set(LOCKABLE_FIELDS)  # default: protect both
@@ -214,6 +226,8 @@ class Config:
     subtitle_rules: RuleSet
     poster_rules: RuleSet
     title_rules: RuleSet
+    logo_rules: RuleSet
+    backdrop_rules: RuleSet
     max_audio_channels: Optional[int]
     subtitle_format_priority: List[str]  # ordered formats; [] = no preference
     skip_user_locked: set  # subset of {"poster", "title"}
@@ -279,14 +293,19 @@ class Config:
         if all(rs.is_empty() for rs in rules.values()):
             raise ConfigError(
                 "No rules configured. Set at least one of AUDIO_RULES, "
-                "SUBTITLES_RULES, POSTER_RULES, TITLE_RULES, or provide a "
-                "config file (CONFIG_FILE / /config/babelarr.yml) with at "
-                "least one of: audio, subtitles, poster, title."
+                "SUBTITLES_RULES, POSTER_RULES, TITLE_RULES, LOGO_RULES, "
+                "BACKDROP_RULES, or provide a config file (CONFIG_FILE / "
+                "/config/babelarr.yml) with at least one of: audio, subtitles, "
+                "poster, title, logo, backdrop."
             )
 
-        # State persistence tracks poster/title locks; it's only needed (and so
-        # only required) when poster or title rules are actually in use.
-        needs_state = not rules["poster"].is_empty() or not rules["title"].is_empty()
+        # State persistence tracks the locks Babelarr sets; it's only needed
+        # (and so only required) when a field-locking concern -- poster, title,
+        # logo or backdrop -- is actually in use.
+        needs_state = any(
+            not rules[c].is_empty()
+            for c in ("poster", "title", "logo", "backdrop")
+        )
         state_persistence = _parse_state_persistence() if needs_state else ""
 
         return cls(
@@ -298,6 +317,8 @@ class Config:
             subtitle_rules=rules["subtitles"],
             poster_rules=rules["poster"],
             title_rules=rules["title"],
+            logo_rules=rules["logo"],
+            backdrop_rules=rules["backdrop"],
             max_audio_channels=max_channels,
             subtitle_format_priority=subtitle_format_priority,
             skip_user_locked=_parse_skip_user_locked(

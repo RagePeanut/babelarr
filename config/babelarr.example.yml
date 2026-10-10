@@ -2,8 +2,9 @@
 # Mount this file and set CONFIG_FILE=/config/babelarr.yml (that path is also
 # the default, so CONFIG_FILE can be omitted if you mount it there).
 #
-# Four independent, OPT-IN concerns. Omit a concern entirely to leave it
-# untouched. Each concern is an ORDERED list of rules, evaluated TOP TO BOTTOM,
+# Six independent, OPT-IN concerns. Omit a concern entirely to leave it
+# untouched (the default for EVERY concern is "don't touch Plex"). Each concern
+# is an ORDERED list of rules, evaluated TOP TO BOTTOM,
 # FIRST MATCH WINS -- declaration ORDER MATTERS (see the README). A more
 # specific key (a language, or a leaf script class like `kana`) MUST appear
 # BEFORE a broader one (`cjk`, `default`) or Babelarr refuses to start.
@@ -28,10 +29,17 @@
 #                                       language" poster -- NOT guaranteed
 #                                       text-free, community-categorized)
 #   title      -> original            (TMDB original/production-language title)
+#   logo       -> original | textless | off
+#                                      (production-language clearLogo; textless;
+#                                       or `off` to CLEAR it so Plex shows the
+#                                       text title. Logos back the title artwork
+#                                       overlaid on the backdrop in Plex apps.)
+#   backdrop   -> original | textless (production-language background art; or a
+#                                       textless one -- usually what you want)
 #
 # NOTE on precedence: setting the matching *_RULES environment variable
-# (AUDIO_RULES / SUBTITLES_RULES / POSTER_RULES / TITLE_RULES) OVERRIDES that
-# concern's section here.
+# (AUDIO_RULES / SUBTITLES_RULES / POSTER_RULES / TITLE_RULES / LOGO_RULES /
+# BACKDROP_RULES) OVERRIDES that concern's section here.
 
 audio:
   - default: [original]          # always prefer original-language audio ("OV")
@@ -52,3 +60,15 @@ title:
   - cjk: [eng]                   # other CJK (Chinese/Korean) -> English title
   - cyrillic: [eng]              # Cyrillic-script originals -> English title
   - default: [original]          # else -> original title
+
+logo:
+  - default: [eng, original]     # English clearLogo, else the original-language
+                                 # one. Use `off` to CLEAR the logo so Plex
+                                 # shows the text title instead (e.g.
+                                 #   - default: [off]
+                                 # ). textless is also allowed.
+
+backdrop:
+  - default: [textless, original]  # textless (no-text) backdrop/art, else the
+                                   # original-language one. Most TMDB backdrops
+                                   # are textless, so this is the common choice.

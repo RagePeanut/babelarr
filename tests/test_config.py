@@ -101,6 +101,10 @@ poster:
 title:
   - cjk: [eng]
   - default: [original]
+logo:
+  - default: [eng, original]
+backdrop:
+  - default: [textless, original]
 """,
         encoding="utf-8",
     )
@@ -112,8 +116,12 @@ title:
     assert cfg.subtitle_rules.match("eng") == ["fra"]
     assert cfg.poster_rules.match("de") == ["eng", "textless"]
     assert cfg.title_rules.match("ja") == ["eng"]
+    assert cfg.logo_rules.match("fr") == ["eng", "original"]
+    assert cfg.backdrop_rules.match("fr") == ["textless", "original"]
     assert cfg.state_persistence == "file"
-    assert cfg.skip_user_locked == {"poster", "title"}  # default
+    assert cfg.skip_user_locked == {
+        "poster", "title", "logo", "backdrop"
+    }  # default
 
 
 @yaml_only
@@ -204,16 +212,18 @@ def test_state_file_override(base_env):
 
 # --- SKIP_USER_LOCKED parsing ----------------------------------------------
 
-def test_skip_user_locked_default_is_both(base_env):
+def test_skip_user_locked_default_is_all(base_env):
     base_env.setenv("AUDIO_RULES", "default:original")
     cfg = Config.from_env()
-    assert cfg.skip_user_locked == {"poster", "title"}
+    assert cfg.skip_user_locked == {"poster", "title", "logo", "backdrop"}
 
 
 def test_skip_user_locked_true(base_env):
     base_env.setenv("AUDIO_RULES", "default:original")
     base_env.setenv("SKIP_USER_LOCKED", "true")
-    assert Config.from_env().skip_user_locked == {"poster", "title"}
+    assert Config.from_env().skip_user_locked == {
+        "poster", "title", "logo", "backdrop"
+    }
 
 
 def test_skip_user_locked_false(base_env):

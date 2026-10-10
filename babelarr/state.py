@@ -1,7 +1,8 @@
 """Per-field lock-state persistence.
 
-Babelarr locks the Plex fields it sets (``title`` / ``thumb``) so Plex's agent
-won't revert them. But a locked field alone can't tell us *who* locked it — us,
+Babelarr locks the Plex fields it sets (``title`` / ``thumb`` / ``clearLogo`` /
+``art``) so Plex's agent won't revert them. But a locked field alone can't tell
+us *who* locked it — us,
 or the user hand-picking a value. To respect the user's manual choices
 (``SKIP_USER_LOCKED``) while still re-managing our own values when rules change,
 we record a **fingerprint** of the value we last wrote for each field, and on

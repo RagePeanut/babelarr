@@ -3,7 +3,7 @@
 **Make Plex speak your languages.**
 
 Plex isn't built for polyglots — Babelarr fixes that. For every movie and show,
-it works out the title's language from TMDB and, driven by four independent sets
+it works out the title's language from TMDB and, driven by six independent sets
 of per-language rules, can:
 
 1. Set the default **audio** track to a chosen language — your original-language
@@ -11,6 +11,9 @@ of per-language rules, can:
 2. Set the **subtitle** track according to your rules (or force it off).
 3. Set the **poster** to a chosen language — or a textless one.
 4. Set the **display title** to a chosen language — or the original.
+5. Set the **logo** (Plex "clearLogo") to a chosen language — or a textless one,
+   or **off** to clear it so your text title shows.
+6. Set the **backdrop** (Plex "art") to a chosen language — or a textless one.
 
 Within the chosen audio language the best track is picked automatically (most
 channels, with an optional ceiling; codec quality breaks ties).
@@ -28,8 +31,8 @@ added items (no Plex Pass).
 
 ## The rule model (read this first)
 
-All four concerns — audio, subtitles, posters, titles — share **one** rule
-grammar.
+All six concerns — audio, subtitles, posters, titles, logos, backdrops — share
+**one** rule grammar.
 
 A rule set is an **ordered list** of `key: preferences` entries. At runtime
 Babelarr walks the list **top to bottom** and the **first matching key wins**.
@@ -47,6 +50,7 @@ key : pref1, pref2, pref3
   * a **script class** (see below) — `cjk`, `kana`, `cyrillic`, …;
   * `xx` / `silent` — matches [silent / no-language](#silent--no-language-titles)
     content (useful mainly in `SUBTITLES_RULES`);
+  * for posters/logos/backdrops the key is the **production** language;
   * `default` — matches anything. **Only valid as the last entry.**
 * **preferences** — an ordered list; the **first available one wins**. Besides
   language codes, each concern allows certain reserved tokens (below).
@@ -68,11 +72,11 @@ last.
 
 These are the only reserved values, and they are **values only** — never keys.
 
-| Token | Audio | Subtitles | Posters | Titles |
-|-------|-------|-----------|---------|--------|
-| `original` | the **content**-language audio track | — | the **production**-language poster | the **production**-language (TMDB original) title |
-| `off` | — | force subtitles **OFF** (distinct from "untouched") | — | — |
-| `textless` | — | — | TMDB **"no language"** poster¹ | — |
+| Token | Audio | Subtitles | Posters | Titles | Logos | Backdrops |
+|-------|-------|-----------|---------|--------|-------|-----------|
+| `original` | the **content**-language audio track | — | the **production**-language poster | the **production**-language (TMDB original) title | the **production**-language logo | the **production**-language backdrop |
+| `off` | — | force subtitles **OFF** (distinct from "untouched") | — | — | **clear** the logo (Plex falls back to the text title) | — |
+| `textless` | — | — | TMDB **"no language"** poster¹ | — | TMDB **"no language"** logo¹ | TMDB **"no language"** backdrop¹ |
 
 > **`original` means two different things** depending on the concern, because
 > Babelarr distinguishes a title's **content language** (what it's actually
@@ -86,6 +90,11 @@ Notes on the gaps:
 * **Subtitles** have no `original` — subtitle rules key on the audio language
   that actually plays, so concrete language keys plus `default` already cover
   every case; an `original` token would be redundant.
+* **Logos** are the only image concern with `off`: because a logo image is
+  shown *instead of* the text display title in Plex apps, `off` clears the logo
+  so your title text appears. (Posters/backdrops always show *something*, so
+  there's nothing to turn "off".) Like the subtitle `off`, logo `off` is always
+  "available", so any preferences listed after it never run.
 
 ¹ `textless` maps to TMDB's "no language / not specified" image category.
 Because TMDB is community-maintained, these posters are **not guaranteed** to be
@@ -183,10 +192,11 @@ Rules for the four concerns can be supplied two ways, and you can mix them:
 
 ### 1. A unified config file (recommended)
 
-One YAML file with top-level keys `audio`, `subtitles`, `poster`, `title`, each
-an ordered list of rules. Mount it and set `CONFIG_FILE=/config/babelarr.yml`
-(that path is also the **default**, so you can omit `CONFIG_FILE` if you mount
-there). This is the cleanest way to manage all four concerns together:
+One YAML file with top-level keys `audio`, `subtitles`, `poster`, `title`,
+`logo`, `backdrop`, each an ordered list of rules. Mount it and set
+`CONFIG_FILE=/config/babelarr.yml` (that path is also the **default**, so you
+can omit `CONFIG_FILE` if you mount there). This is the cleanest way to manage
+all six concerns together:
 
 ```yaml
 audio:
@@ -199,6 +209,10 @@ poster:
 title:
   - cjk: [eng]
   - default: [original]
+logo:
+  - default: [eng, original]   # English logo, else original-language; or [off]
+backdrop:
+  - default: [textless, original]
 ```
 
 See [`config/babelarr.example.yml`](config/babelarr.example.yml). Omit a concern
@@ -206,8 +220,8 @@ to leave it untouched.
 
 ### 2. Per-concern environment variables
 
-`AUDIO_RULES`, `SUBTITLES_RULES`, `POSTER_RULES`, `TITLE_RULES`. Each accepts
-either form (auto-detected):
+`AUDIO_RULES`, `SUBTITLES_RULES`, `POSTER_RULES`, `TITLE_RULES`, `LOGO_RULES`,
+`BACKDROP_RULES`. Each accepts either form (auto-detected):
 
 * **Inline string** — entries separated by `;`, preferences by `,`:
   ```
@@ -225,8 +239,8 @@ either form (auto-detected):
 
 > **If a `*_RULES` environment variable is set, it completely overrides that
 > concern's section in the config file.** The override is **per concern**: e.g.
-> setting `TITLE_RULES` replaces *only* the `title:` section; `audio`,
-> `subtitles` and `poster` still come from the file. A concern you set via env
+> setting `TITLE_RULES` replaces *only* the `title:` section; the other
+> concerns still come from the file. A concern you set via env
 > var ignores its file section entirely (they are not merged — the env var
 > wins outright).
 
@@ -234,7 +248,9 @@ either form (auto-detected):
 
 Babelarr does nothing without rules, so this is almost always a misconfiguration.
 **Startup fails** if no concern has rules from *either* source — set at least one
-`*_RULES` variable or provide a config file with at least one concern.
+`*_RULES` variable or provide a config file with at least one concern. Every
+concern defaults to **leaving Plex untouched**, so Babelarr only ever changes
+what you've explicitly asked it to.
 
 ---
 
@@ -256,7 +272,7 @@ Babelarr deliberately uses the **right one for each concern**:
 | Concern | Language used | Why |
 |---------|---------------|-----|
 | **audio**, **subtitles** | **content** language | you want the track in the language the title is actually spoken in |
-| **poster**, **title** | **production** language | "the original poster/title" conventionally means the *production* one (e.g. *Uzumaki*'s official English title/poster) |
+| **poster**, **title**, **logo**, **backdrop** | **production** language | "the original poster/title/logo/art" conventionally means the *production* one (e.g. *Uzumaki*'s official English title/poster) |
 
 So for *Uzumaki* with `AUDIO_RULES=default:original`, `SUBTITLES_RULES=...`,
 `POSTER_RULES=default:original`, `TITLE_RULES=default:original` you get
@@ -425,11 +441,65 @@ Preferences are title languages; `original` resolves to TMDB's original title
 (the production-language title). When Babelarr sets a title it also **locks** the
 Plex title field so the agent won't revert it on the next refresh.
 
+### Logos — `LOGO_RULES`
+
+A **logo** (Plex calls it the "clearLogo") is a transparent PNG of the title's
+name, overlaid on the backdrop at the top of a title's page. **When a logo
+exists, Plex apps show it *instead of* the text display title** — so a localized
+logo can override the title you set (e.g. the French "American Nightmare" logo
+appears for *The Purge*, hiding your English title text).
+
+> **Most people want `LOGO_RULES` set the same as `TITLE_RULES`.** The logo is
+> just a *pictorial* version of the display title, so it only makes sense for
+> the two to agree — otherwise Plex shows one language's title as text and
+> another's as the overlaid image. If your titles are
+> `TITLE_RULES=jpn:original;cjk:eng;default:original`, use the same for logos:
+> `LOGO_RULES=jpn:original;cjk:eng;default:original`. (The `off` token has no
+> title equivalent — it means "show no logo image, just the text title".)
+
+Keyed by the title's **production language** (TMDB `original_language`).
+Preferences are logo languages; `original` resolves to that production language,
+`textless` matches TMDB's no-language logos, and `off` **clears the logo
+entirely** so Plex falls back to the text title. Among candidates for a given
+preference, the highest-voted logo on TMDB is chosen; if it is already one of
+the item's logo candidates it is **selected**, otherwise **uploaded**. When
+Babelarr sets (or clears) a logo it **locks** the field so Plex's agent won't
+re-pick one, and fingerprints the result (same ownership model as posters).
+
+Like every concern, a logo rule only ever acts on what it explicitly matches:
+if the matched preference list has no available logo on TMDB, or no rule matches
+the title at all, the logo is **left exactly as Plex has it** — Babelarr adds no
+behavior of its own beyond the languages you list.
+
+```
+# Prefer the English logo, else the original-language one
+# (mirror your TITLE_RULES — see the note above):
+LOGO_RULES=default:eng,original
+
+# Never show a logo overlay — always use the text display title:
+LOGO_RULES=default:off
+```
+
+### Backdrops — `BACKDROP_RULES`
+
+A **backdrop** (Plex "art") is the full-bleed background image on a title's
+page. Keyed by the title's **production language**. Preferences are backdrop
+languages; `original` resolves to the production language and `textless` matches
+TMDB's no-language backdrops. Most TMDB backdrops are textless (no overlaid
+text), so `textless` is usually what you want. Selection, upload, locking and
+fingerprinting work exactly as for posters.
+
+```
+# Prefer a clean textless backdrop, else the original-language one:
+BACKDROP_RULES=default:textless,original
+```
+
 ### Protecting hand-picked artwork/titles — `SKIP_USER_LOCKED` + state
 
-When Babelarr sets a poster or title it **locks** the Plex field (so Plex's
-agent won't revert it) and records a **fingerprint** of what it set. On later
-runs it compares to tell *its own* value apart from one **you** set by hand:
+When Babelarr sets a poster, title, logo or backdrop it **locks** the Plex field
+(so Plex's agent won't revert it) and records a **fingerprint** of what it set.
+On later runs it compares to tell *its own* value apart from one **you** set by
+hand:
 
 * **Titles** fingerprint the title *string*. So Babelarr recognizes its own
   title (and won't rewrite it needlessly), and if you change `TITLE_RULES` the
@@ -450,11 +520,13 @@ Babelarr never set it) is treated as **user-owned**.
 
 | Value | Effect |
 |-------|--------|
-| `true` / `all` | protect **both** user-locked posters and titles (default) |
-| `false` / `none` | protect **neither** — overwrite even your hand-locked fields |
+| `true` / `all` | protect **all** user-locked posters, titles, logos and backdrops (default) |
+| `false` / `none` | protect **none** — overwrite even your hand-locked fields |
 | `poster` | protect only user-locked **posters** |
 | `title` | protect only user-locked **titles** |
-| `poster,title` | both (same as `true`) |
+| `logo` | protect only user-locked **logos** |
+| `backdrop` | protect only user-locked **backdrops** |
+| `poster,title,logo,backdrop` | any comma-separated subset (listing all four == `true`) |
 
 (Babelarr's *own* locked fields are always re-manageable regardless — this guard
 only concerns fields **you** locked.)
@@ -462,9 +534,9 @@ only concerns fields **you** locked.)
 #### `STATE_PERSISTENCE` — how Babelarr remembers its own values (**required**)
 
 Because this all hinges on fingerprints, you must choose where they're stored.
-`STATE_PERSISTENCE` is **required** when poster or title rules are used (it has
-**no default** — the choice is impactful). It's irrelevant, and not required,
-for audio/subtitle-only setups.
+`STATE_PERSISTENCE` is **required** when any field-locking concern (poster,
+title, logo or backdrop) is used (it has **no default** — the choice is
+impactful). It's irrelevant, and not required, for audio/subtitle-only setups.
 
 | Value | Mechanism | Trade-off |
 |-------|-----------|-----------|
@@ -504,8 +576,10 @@ come from a config file and/or `*_RULES` env vars — see
 | `SUBTITLES_RULES` | *(unset = untouched)* | Subtitle rule set. Token: `off`. **Overrides** the file's `subtitles:`. |
 | `POSTER_RULES` | *(unset = untouched)* | Poster rule set. Tokens: `original`, `textless`. **Overrides** the file's `poster:`. |
 | `TITLE_RULES` | *(unset = untouched)* | Title rule set. Token: `original`. **Overrides** the file's `title:`. |
-| `SKIP_USER_LOCKED` | `true` | Which **user-locked** fields to leave alone: `true`/`all`, `false`/`none`, `poster`, `title`, or `poster,title`. |
-| `STATE_PERSISTENCE` | — (**required** if poster/title rules used) | How Babelarr remembers its own values: `file` or `labels`. No default. |
+| `LOGO_RULES` | *(unset = untouched)* | Logo (clearLogo) rule set. Tokens: `original`, `textless`, `off` (clear the logo). **Overrides** the file's `logo:`. |
+| `BACKDROP_RULES` | *(unset = untouched)* | Backdrop (art) rule set. Tokens: `original`, `textless`. **Overrides** the file's `backdrop:`. |
+| `SKIP_USER_LOCKED` | `true` | Which **user-locked** fields to leave alone: `true`/`all`, `false`/`none`, or a comma-separated subset of `poster`, `title`, `logo`, `backdrop`. |
+| `STATE_PERSISTENCE` | — (**required** if poster/title/logo/backdrop rules used) | How Babelarr remembers its own values: `file` or `labels`. No default. |
 | `STATE_FILE` | `/config/babelarr-state.json` | Path to the JSON state file (only used when `STATE_PERSISTENCE=file`). |
 | `MAX_AUDIO_CHANNELS` | *(unset = no cap)* | Ceiling on audio channels (e.g. `6` = 5.1). |
 | `SUBTITLE_CODEC_PRIORITY` | *(unset = first match wins)* | Ordered, comma-separated subtitle codec preference (e.g. `srt,ass,pgs`) to break ties between same-language tracks. Canonical names match all known alias spellings (e.g. `srt` also matches `subrip`); any other value matches literally. Unlisted codecs sort last. See [Codec priority](#codec-priority-subtitle_codec_priority). |
@@ -593,6 +667,8 @@ services:
       - SUBTITLES_RULES=eng:fre;fre:off;default:fre,eng
       - POSTER_RULES=fre:fra;default:eng,textless
       - TITLE_RULES=jpn:original;cjk:eng;default:original
+      - LOGO_RULES=default:eng,original
+      - BACKDROP_RULES=default:textless,original
       - MAX_AUDIO_CHANNELS=6
       - NEW_MEDIA_MODE=webhook
     ports:
@@ -616,9 +692,9 @@ pytest
 ```
 
 The selection logic (`babelarr/selector.py`, `poster_selector.py`,
-`title_selector.py`) and the rule engine (`babelarr/rules.py`,
-`langscript.py`) are pure (no Plex/network dependencies) and fully unit-tested
-in `tests/`.
+`title_selector.py`, `image_selector.py`) and the rule engine
+(`babelarr/rules.py`, `langscript.py`) are pure (no Plex/network dependencies)
+and fully unit-tested in `tests/`.
 
 ---
 

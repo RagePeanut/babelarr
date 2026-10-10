@@ -4,13 +4,13 @@ Shared by every entry point (full sweep, webhook handler, recent poll) so the
 behavior is identical regardless of what triggered it. A per-rating-key lock
 serializes concurrent work on the same item.
 
-For each title Babelarr applies up to four independent, opt-in concerns. They
+For each title Babelarr applies up to six independent, opt-in concerns. They
 are driven by TWO different languages:
   * audio + subtitle track defaults -> the CONTENT language (what the title is
     spoken in; resolved from TMDB spoken_languages + the file's audio tracks,
     with a ``babelarr-ov:<lang>`` label override).
-  * poster + display title          -> the PRODUCTION language (TMDB
-    original_language), i.e. "the original poster/title".
+  * poster + title + logo + backdrop -> the PRODUCTION language (TMDB
+    original_language), i.e. "the original poster/title/logo/art".
 """
 
 from __future__ import annotations
@@ -27,6 +27,8 @@ from .plex_client import (
     _SHOW,
     _audio_views,
     _subtitle_views,
+    apply_backdrop,
+    apply_logo,
     apply_poster,
     apply_selection,
     apply_title,
@@ -34,6 +36,7 @@ from .plex_client import (
     production_language_for,
     resolve_tmdb_id,
 )
+from .image_selector import select_image
 from .poster_selector import select_poster
 from .selector import select_for_part
 from .state import StatePersistence, build_state
@@ -235,7 +238,10 @@ class Processor:
     def _process_poster_and_title(self, item, production_language, is_movie: bool) -> None:
         want_poster = not self.config.poster_rules.is_empty()
         want_title = not self.config.title_rules.is_empty()
-        if not (want_poster or want_title) or production_language is None:
+        want_logo = not self.config.logo_rules.is_empty()
+        want_backdrop = not self.config.backdrop_rules.is_empty()
+        if not (want_poster or want_title or want_logo or want_backdrop) \
+                or production_language is None:
             return
 
         tmdb_id = resolve_tmdb_id(item, self.tmdb, is_movie)
@@ -251,6 +257,27 @@ class Processor:
                                  self.state, self.config.dry_run)
             except Exception:  # pragma: no cover - defensive
                 log.exception("Failed poster for %s", getattr(item, "title", "?"))
+
+        if want_logo:
+            try:
+                logos = self.tmdb.logos(tmdb_id, is_movie)
+                key = select_image(logos, production_language, self.config.logo_rules)
+                if key:
+                    apply_logo(item, key, self.config.skip_user_locked,
+                               self.state, self.config.dry_run)
+            except Exception:  # pragma: no cover - defensive
+                log.exception("Failed logo for %s", getattr(item, "title", "?"))
+
+        if want_backdrop:
+            try:
+                backdrops = self.tmdb.backdrops(tmdb_id, is_movie)
+                key = select_image(backdrops, production_language,
+                                   self.config.backdrop_rules)
+                if key:
+                    apply_backdrop(item, key, self.config.skip_user_locked,
+                                   self.state, self.config.dry_run)
+            except Exception:  # pragma: no cover - defensive
+                log.exception("Failed backdrop for %s", getattr(item, "title", "?"))
 
         if want_title:
             try:

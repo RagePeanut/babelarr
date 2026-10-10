@@ -1,0 +1,25 @@
+# Optional readable form of BACKDROP_RULES.
+# Mount this file and set: BACKDROP_RULES=/config/backdrop_rules.yml
+#
+# Backdrops (Plex "art") are the full-bleed background image on a title's page.
+# TMDB tags backdrops with a language when they contain localized text, but the
+# large majority are "no language" (textless) -- so `textless` is usually what
+# you want.
+#
+# Rules are an ORDERED list, evaluated TOP TO BOTTOM, first match wins (see the
+# subtitle example for the full semantics). Each key is a title's PRODUCTION
+# (original) language, a script class, or `default`. The value is an ordered
+# list of backdrop-language preferences; the first available one wins. Reserved
+# tokens for backdrops:
+#   original  -> a backdrop in the title's PRODUCTION language.
+#   textless  -> a backdrop from TMDB's "no language / not specified" category
+#                (the usual choice -- a clean image with no overlaid text).
+#
+# NOTE: `textless` maps to TMDB's "no language" category and is community-
+# categorized, so it is best effort.
+#
+# If a matched rule's preferences are all unavailable, the backdrop is left
+# UNTOUCHED (never falls through to `default`). The default for the whole
+# concern is "don't touch Plex" -- omit BACKDROP_RULES to leave backdrops alone.
+rules:
+  - default: [textless, original]  # a clean textless backdrop, else original-lang
