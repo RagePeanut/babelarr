@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 
 import requests
 
+from .image_selector import ImageView
 from .langcodes import normalize
 from .poster_selector import PosterView
 from .title_selector import TitleOptions
@@ -117,6 +118,58 @@ class TMDBClient:
                 )
             )
         return tuple(views)
+
+    # -- logos & backdrops ---------------------------------------------------
+    #
+    # TMDB's single /images endpoint returns ``posters``, ``logos`` and
+    # ``backdrops`` arrays, all sharing the same shape (``file_path``,
+    # ``iso_639_1``, ``vote_average``). Logos back Plex's "clearLogo" (the title
+    # artwork overlaid on the backdrop); backdrops back Plex's "art". Both are
+    # chosen with the same language-keyed logic as posters, so we expose them as
+    # ``ImageView`` tuples for the shared image selector.
+
+    def _images_of(self, tmdb_id: int, is_movie: bool, category: str) -> tuple:
+        """Return a tuple of ImageView for one image ``category``.
+
+        ``category`` is a key in TMDB's /images response (``logos`` or
+        ``backdrops``). As with posters we merge an English+null-filtered query
+        with an unfiltered one so every language's images -- and the "no
+        language" (textless) ones -- are present. The absolute image URL is the
+        opaque ``key`` the Plex layer applies.
+        """
+        kind = "movie" if is_movie else "tv"
+        data = self._get(
+            f"/{kind}/{tmdb_id}/images", include_image_language="null,en"
+        )
+        data_all = self._get(f"/{kind}/{tmdb_id}/images", include_image_language="")
+        merged: Dict[str, dict] = {}
+        for d in (data, data_all):
+            if not d:
+                continue
+            for img in d.get(category, []) or []:
+                fp = img.get("file_path")
+                if fp:
+                    merged[fp] = img
+        views: List[ImageView] = []
+        for fp, img in merged.items():
+            views.append(
+                ImageView(
+                    key=f"{_IMG_BASE}{fp}",
+                    language_code=img.get("iso_639_1"),  # None/"" -> textless
+                    vote_average=float(img.get("vote_average", 0.0) or 0.0),
+                )
+            )
+        return tuple(views)
+
+    @lru_cache(maxsize=2048)
+    def logos(self, tmdb_id: int, is_movie: bool) -> tuple:
+        """Return a tuple of ImageView for a title's logos (all languages)."""
+        return self._images_of(tmdb_id, is_movie, "logos")
+
+    @lru_cache(maxsize=2048)
+    def backdrops(self, tmdb_id: int, is_movie: bool) -> tuple:
+        """Return a tuple of ImageView for a title's backdrops (all languages)."""
+        return self._images_of(tmdb_id, is_movie, "backdrops")
 
     # -- titles --------------------------------------------------------------
 

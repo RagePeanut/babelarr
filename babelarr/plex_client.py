@@ -1,10 +1,11 @@
 """Plex integration: enumerate libraries, resolve metadata, apply changes.
 
 Wraps python-plexapi. Translates Plex media parts into the lightweight views
-consumed by the pure selectors, and writes chosen defaults / posters / titles
-back to Plex. Honors the ``SKIP_USER_LOCKED`` guard (via fingerprint state) so
-posters/titles the *user* locked by hand are never clobbered, while Babelarr's
-own locked values are still re-managed.
+consumed by the pure selectors, and writes chosen defaults / posters / titles /
+logos / backdrops back to Plex. Honors the ``SKIP_USER_LOCKED`` guard (via
+fingerprint state) so poster/title/logo/backdrop values the *user* locked by
+hand are never clobbered, while Babelarr's own locked values are still
+re-managed.
 """
 
 from __future__ import annotations
@@ -285,15 +286,22 @@ def apply_selection(part, selection: Selection, dry_run: bool) -> bool:
 
 # -- poster / title field locking -------------------------------------------
 
-# Plex field names behind each concern (for lock inspection).
+# Plex field names behind each concern (for lock inspection). Posters lock as
+# ``thumb``; logos (Plex "clearLogo") as ``clearLogo``; backdrops (Plex "art")
+# as ``art``; the display title as ``title``.
 _FIELD_TITLE = "title"
 _FIELD_POSTER = "thumb"
-# Secondary state slot: the intended source URL of a poster Babelarr UPLOADED.
+_FIELD_LOGO = "clearLogo"
+_FIELD_ART = "art"
+# Secondary state slot: the intended source URL of an image Babelarr UPLOADED.
 # Only needed for uploads, where the resulting key (upload://<hash>) differs
-# from the source URL; for a *selected* poster the resulting key already IS the
-# URL, so no second value is recorded. Lets us answer "does the uploaded poster
-# correspond to the URL the rules want now?" (rule-change detection).
+# from the source URL; for a *selected* image the resulting key already IS the
+# URL, so no second value is recorded. Lets us answer "does the uploaded image
+# correspond to the URL the rules want now?" (rule-change detection). Each
+# image concern gets its own ``<field>-url`` slot.
 _FIELD_POSTER_URL = "thumb-url"
+_FIELD_LOGO_URL = "clearLogo-url"
+_FIELD_ART_URL = "art-url"
 
 
 def _is_field_locked(item, field_name: str) -> bool:
@@ -316,34 +324,84 @@ def _user_owns_field(item, field_name: str, current_value, state) -> bool:
     return not state.is_ours(item, field_name, current_value)
 
 
-def _find_existing_poster(item, poster_url):
-    """Return an existing poster candidate matching ``poster_url``, or None.
+def _label_tags(labels) -> list:
+    """Tag strings from a plexapi label list (or our fakes)."""
+    return [getattr(l, "tag", None) for l in (labels or []) if getattr(l, "tag", None)]
 
-    Plex lists TMDB poster candidates with their ``ratingKey``/``key`` equal to
-    the source URL, so a wanted TMDB poster is often already present -- we can
-    select it instead of re-uploading the image.
+
+# -- generic image concern (poster / logo / backdrop) -----------------------
+#
+# Posters, logos (Plex "clearLogo") and backdrops (Plex "art") are applied
+# identically: Plex exposes candidate images (``posters()`` / ``logos()`` /
+# ``arts()``) whose ``ratingKey``/``key`` equals the TMDB source URL, so a wanted
+# image is often already a candidate and can be *selected* rather than
+# re-uploaded. The only variation is the method/field names, captured in an
+# ``_ImageConcern`` so one implementation serves all three.
+
+
+class _ImageConcern:
+    """Method/field names binding the generic image logic to one Plex concern."""
+
+    __slots__ = ("field", "url_field", "skip_key", "candidates", "set", "upload",
+                 "lock", "delete")
+
+    def __init__(self, field, url_field, skip_key, candidates, set_, upload, lock,
+                 delete):
+        self.field = field          # lock field name, e.g. "thumb" / "clearLogo"
+        self.url_field = url_field  # secondary state slot for uploads
+        self.skip_key = skip_key    # SKIP_USER_LOCKED key, e.g. "poster"
+        self.candidates = candidates  # method name returning candidate images
+        self.set = set_             # method name to select an existing candidate
+        self.upload = upload        # method name to upload from a URL
+        self.lock = lock            # method name to lock the field
+        self.delete = delete        # method name to clear the image (or None)
+
+
+_POSTER_CONCERN = _ImageConcern(
+    field=_FIELD_POSTER, url_field=_FIELD_POSTER_URL, skip_key="poster",
+    candidates="posters", set_="setPoster", upload="uploadPoster",
+    lock="lockPoster", delete=None,
+)
+_LOGO_CONCERN = _ImageConcern(
+    field=_FIELD_LOGO, url_field=_FIELD_LOGO_URL, skip_key="logo",
+    candidates="logos", set_="setLogo", upload="uploadLogo",
+    lock="lockLogo", delete="deleteLogo",
+)
+_ART_CONCERN = _ImageConcern(
+    field=_FIELD_ART, url_field=_FIELD_ART_URL, skip_key="backdrop",
+    candidates="arts", set_="setArt", upload="uploadArt",
+    lock="lockArt", delete="deleteArt",
+)
+
+
+def _find_existing_image(item, concern: _ImageConcern, image_url):
+    """Return an existing candidate matching ``image_url``, or None.
+
+    Plex lists TMDB candidates with their ``ratingKey``/``key`` equal to the
+    source URL, so a wanted TMDB image is often already present -- we can select
+    it instead of re-uploading.
     """
     try:
-        candidates = item.posters()
+        candidates = getattr(item, concern.candidates)()
     except Exception:  # pragma: no cover - network/plex variance
         return None
     for p in candidates or []:
-        if poster_url in (getattr(p, "ratingKey", None), getattr(p, "key", None)):
+        if image_url in (getattr(p, "ratingKey", None), getattr(p, "key", None)):
             return p
     return None
 
 
-def _selected_poster_key(item):
-    """Key of the item's currently-selected poster, or ``None``.
+def _selected_image_key(item, concern: _ImageConcern):
+    """Key of the item's currently-selected image for this concern, or ``None``.
 
-    For a poster Babelarr *selected* from the candidates this is the source URL
+    For an image Babelarr *selected* from the candidates this is the source URL
     (TMDB candidates expose their URL as the ratingKey); for an *uploaded* one
-    it's an ``upload://posters/<hash>`` id. Either way it describes the poster
-    actually in effect, so we can tell our own poster from a user's swap and
-    detect when a rule now wants a different poster.
+    it's an ``upload://.../<hash>`` id. Either way it describes the image
+    actually in effect, so we can tell our own image from a user's swap and
+    detect when a rule now wants a different one.
     """
     try:
-        for p in item.posters():
+        for p in getattr(item, concern.candidates)():
             if getattr(p, "selected", False):
                 return getattr(p, "ratingKey", None) or getattr(p, "key", None)
     except Exception:  # pragma: no cover - network/plex variance
@@ -351,54 +409,102 @@ def _selected_poster_key(item):
     return None
 
 
-def _label_tags(labels) -> list:
-    """Tag strings from a plexapi label list (or our fakes)."""
-    return [getattr(l, "tag", None) for l in (labels or []) if getattr(l, "tag", None)]
+def _apply_image_off(item, concern: _ImageConcern, skip_user_locked, state,
+                     dry_run: bool) -> bool:
+    """Clear the image (logo ``off`` token) so Plex falls back to its default.
+
+    Mirrors :func:`_apply_image` ownership logic: a user-locked image we don't
+    own is left alone when protected. Clearing deletes the image and locks the
+    field (so Plex's agent won't re-pick one), fingerprinting the empty state so
+    a later rule change that wants an image again is detectable, and so we don't
+    re-clear every sweep.
+    """
+    current_key = _selected_image_key(item, concern)
+    locked = _is_field_locked(item, concern.field)
+    # Fingerprint of "cleared" is recorded against a stable sentinel value.
+    off_sentinel = "babelarr:off"
+    # "ours" when either an image we set is still in effect, OR our last
+    # recorded state for this field is the cleared sentinel (no image selected).
+    already_off = state.is_ours(item, concern.field, off_sentinel)
+    ours = already_off or state.is_ours(item, concern.field, current_key)
+
+    if locked and not ours and concern.skip_key in skip_user_locked:
+        log.debug("  %s user-locked, skipping %s", concern.skip_key,
+                  getattr(item, "title", "?"))
+        return False
+    if already_off:
+        log.debug("  %s already cleared by Babelarr, skipping %s",
+                  concern.skip_key, getattr(item, "title", "?"))
+        return False
+
+    log.info("  %s -> off (clear)%s", concern.skip_key,
+             " (dry-run)" if dry_run else "")
+    if dry_run:
+        return True
+    labels_before = _label_tags(getattr(item, "labels", None))
+    deleter = getattr(item, concern.delete, None)
+    if deleter is not None:
+        try:
+            deleter()
+        except Exception:  # pragma: no cover - network/plex variance
+            log.exception("  could not clear %s for %s", concern.skip_key,
+                          getattr(item, "title", "?"))
+            return False
+    getattr(item, concern.lock)()  # lock so the agent won't re-pick one
+    try:
+        item.reload()
+    except Exception:  # pragma: no cover - defensive
+        pass
+    state.record(item, concern.field, off_sentinel, extra_tags=labels_before)
+    state.clear(item, concern.url_field, extra_tags=labels_before)
+    return True
 
 
-def apply_poster(item, poster_url, skip_user_locked, state, dry_run: bool) -> bool:
-    """Set the poster to ``poster_url``, lock it, and fingerprint the result.
+def _apply_image(item, concern: _ImageConcern, image_url, skip_user_locked, state,
+                 dry_run: bool) -> bool:
+    """Set this concern's image to ``image_url``, lock it, fingerprint the result.
 
-    Babelarr records the **resulting selected key** (``thumb``) -- the poster
-    actually in effect (the source URL when selected from candidates, else the
-    ``upload://`` id). For an UPLOADED poster, whose key differs from the source
-    URL, it ALSO records the intended URL (``thumb-url``) so a later rule change
-    is detectable; for a selected poster that second value is unnecessary (the
-    key already IS the URL) and is not written.
+    Shared by posters, logos and backdrops. Records the **resulting selected
+    key** (the source URL when selected from candidates, else the ``upload://``
+    id). For an UPLOADED image, whose key differs from the source URL, it ALSO
+    records the intended URL (``<field>-url``) so a later rule change is
+    detectable; for a selected image that second value is unnecessary (the key
+    already IS the URL) and is not written.
 
-    Behavior for a locked poster:
-    * not ``ours`` (selected key != recorded ``thumb``) -> user hand-picked/
-      swapped; skip when ``poster`` is in ``skip_user_locked``.
-    * ``ours`` and already the wanted poster -> skip (no re-set every sweep).
-    * ``ours`` but the rules now want a different poster -> re-apply.
+    Behavior for a locked field:
+    * not ``ours`` (selected key != recorded fingerprint) -> user hand-picked/
+      swapped; skip when this concern is in ``skip_user_locked``.
+    * ``ours`` and already the wanted image -> skip (no re-set every sweep).
+    * ``ours`` but the rules now want a different image -> re-apply.
 
     Setting prefers selecting an existing candidate over re-uploading.
     """
-    current_key = _selected_poster_key(item)
-    locked = _is_field_locked(item, _FIELD_POSTER)
-    ours = state.is_ours(item, _FIELD_POSTER, current_key)
-    # "wanted" = the poster in effect corresponds to this run's URL. For a
-    # selected poster the key IS the URL (thumb match); for an uploaded one we
-    # compare the separately-recorded source URL (thumb-url).
+    current_key = _selected_image_key(item, concern)
+    locked = _is_field_locked(item, concern.field)
+    ours = state.is_ours(item, concern.field, current_key)
+    # "wanted" = the image in effect corresponds to this run's URL. For a
+    # selected image the key IS the URL (field match); for an uploaded one we
+    # compare the separately-recorded source URL (<field>-url).
     wanted = (
-        state.is_ours(item, _FIELD_POSTER, poster_url)
-        or state.is_ours(item, _FIELD_POSTER_URL, poster_url)
+        state.is_ours(item, concern.field, image_url)
+        or state.is_ours(item, concern.url_field, image_url)
     )
 
-    # User hand-picked / swapped (locked, and the on-disk poster isn't ours).
-    if locked and not ours and "poster" in skip_user_locked:
-        log.debug("  poster user-locked, skipping %s", getattr(item, "title", "?"))
-        return False
-
-    # Already our poster AND it already corresponds to the wanted URL -> skip.
-    if ours and wanted:
-        log.debug("  poster already set by Babelarr, skipping %s",
+    # User hand-picked / swapped (locked, and the on-disk image isn't ours).
+    if locked and not ours and concern.skip_key in skip_user_locked:
+        log.debug("  %s user-locked, skipping %s", concern.skip_key,
                   getattr(item, "title", "?"))
         return False
 
-    existing = _find_existing_poster(item, poster_url)
+    # Already our image AND it already corresponds to the wanted URL -> skip.
+    if ours and wanted:
+        log.debug("  %s already set by Babelarr, skipping %s",
+                  concern.skip_key, getattr(item, "title", "?"))
+        return False
+
+    existing = _find_existing_image(item, concern, image_url)
     verb = "select" if existing is not None else "upload"
-    log.info("  poster -> %s (%s)%s", poster_url, verb,
+    log.info("  %s -> %s (%s)%s", concern.skip_key, image_url, verb,
              " (dry-run)" if dry_run else "")
     if dry_run:
         return True
@@ -407,31 +513,62 @@ def apply_poster(item, poster_url, skip_user_locked, state, dry_run: bool) -> bo
     # reading them from ``item.labels`` -- but ``item.reload()`` below can
     # return a copy that doesn't yet reflect a lock label written on a PREVIOUS
     # run (Plex is eventually-consistent on label writes). If the stale
-    # post-reload list drove the self-heal, the old ``thumb`` fingerprint label
-    # would never be removed and duplicates would accumulate. So we pass these
+    # post-reload list drove the self-heal, the old fingerprint label would
+    # never be removed and duplicates would accumulate. So we pass these
     # pre-reload tags into record/clear so the self-heal sees the true state.
     labels_before = _label_tags(getattr(item, "labels", None))
     if existing is not None:
-        # Wanted poster is already a candidate (e.g. a TMDB poster Plex knows)
+        # Wanted image is already a candidate (e.g. a TMDB image Plex knows)
         # -- select it instead of re-downloading/uploading.
-        item.setPoster(existing)
+        getattr(item, concern.set)(existing)
     else:
-        item.uploadPoster(url=poster_url)
-    item.lockPoster()
+        getattr(item, concern.upload)(url=image_url)
+    getattr(item, concern.lock)()
     try:
         item.reload()
     except Exception:  # pragma: no cover - defensive
         pass
-    resulting = _selected_poster_key(item) or poster_url
-    state.record(item, _FIELD_POSTER, resulting, extra_tags=labels_before)
+    resulting = _selected_image_key(item, concern) or image_url
+    state.record(item, concern.field, resulting, extra_tags=labels_before)
     # Only an upload needs the extra URL record (resulting key != URL). For a
-    # selected poster the key already equals the URL, so skip the redundancy
-    # and clear any stale thumb-url from a previous upload.
-    if resulting != poster_url:
-        state.record(item, _FIELD_POSTER_URL, poster_url, extra_tags=labels_before)
+    # selected image the key already equals the URL, so skip the redundancy and
+    # clear any stale <field>-url from a previous upload.
+    if resulting != image_url:
+        state.record(item, concern.url_field, image_url, extra_tags=labels_before)
     else:
-        state.clear(item, _FIELD_POSTER_URL, extra_tags=labels_before)
+        state.clear(item, concern.url_field, extra_tags=labels_before)
     return True
+
+
+# -- public image apply wrappers --------------------------------------------
+
+
+def apply_poster(item, poster_url, skip_user_locked, state, dry_run: bool) -> bool:
+    """Set + lock the poster (``thumb``). See :func:`_apply_image`."""
+    return _apply_image(item, _POSTER_CONCERN, poster_url, skip_user_locked,
+                        state, dry_run)
+
+
+def apply_logo(item, logo_url, skip_user_locked, state, dry_run: bool) -> bool:
+    """Set + lock the logo (``clearLogo``).
+
+    ``logo_url`` may be the :data:`babelarr.image_selector.SELECT_OFF` sentinel,
+    meaning "clear the logo" so Plex falls back to the text display title; it is
+    dispatched to :func:`_apply_image_off`. Otherwise behaves like a poster.
+    """
+    from .image_selector import SELECT_OFF
+
+    if logo_url == SELECT_OFF:
+        return _apply_image_off(item, _LOGO_CONCERN, skip_user_locked, state,
+                                dry_run)
+    return _apply_image(item, _LOGO_CONCERN, logo_url, skip_user_locked, state,
+                        dry_run)
+
+
+def apply_backdrop(item, art_url, skip_user_locked, state, dry_run: bool) -> bool:
+    """Set + lock the backdrop (Plex ``art``). See :func:`_apply_image`."""
+    return _apply_image(item, _ART_CONCERN, art_url, skip_user_locked, state,
+                        dry_run)
 
 
 def apply_title(item, title: str, skip_user_locked, state, dry_run: bool) -> bool:

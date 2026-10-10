@@ -1,0 +1,33 @@
+# Optional readable form of LOGO_RULES.
+# Mount this file and set: LOGO_RULES=/config/logo_rules.yml
+#
+# Logos (Plex "clearLogo") are the title artwork overlaid on the backdrop in
+# Plex apps. When a logo exists, Plex shows it INSTEAD of the text display
+# title. TMDB provides language-tagged logos, so Plex often auto-picks one in
+# your server language (e.g. a French "American Nightmare" logo for "The Purge")
+# even when you've set a different text title.
+#
+# Rules are an ORDERED list, evaluated TOP TO BOTTOM, first match wins (see the
+# subtitle example for the full semantics). Each key is a title's PRODUCTION
+# (original) language, a script class, or `default`. The value is an ordered
+# list of logo-language preferences; the first available one wins. Reserved
+# tokens for logos:
+#   original  -> a logo in the title's PRODUCTION language.
+#   textless  -> a logo from TMDB's "no language / not specified" category.
+#   off       -> CLEAR the logo entirely, so Plex falls back to the text
+#                display title you've set. `off` is always "available", so any
+#                preferences after it are unreachable.
+#
+# NOTE: `textless` maps to TMDB's "no language" category and is community-
+# categorized, so it is best effort (not guaranteed to be free of text).
+#
+# If a matched rule's preferences are all unavailable, the logo is left
+# UNTOUCHED (never falls through to `default`). The default for the whole
+# concern is "don't touch Plex" -- omit LOGO_RULES to leave logos alone.
+rules:
+  - default: [eng, original]   # English logo, else the production-language one
+
+# Alternatives:
+#   - default: [off]           # never show a logo; always use the text title
+#   - jpn: [original]          # keep Japanese films' original-language logo
+#     default: [eng, off]      # else English logo, else no logo at all

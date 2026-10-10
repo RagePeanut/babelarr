@@ -16,7 +16,9 @@ services:
       # and localized titles.
       - TMDB_API_KEY=xxxxxxxxxxxxxxxxxxxx
 
-      # --- Rules: four independent, OPT-IN concerns. ---
+      # --- Rules: six independent, OPT-IN concerns. ---
+      # Every concern defaults to "don't touch Plex" -- Babelarr only changes
+      # what you explicitly configure.
       # Supply them EITHER via the unified config file (see babelarr.example.yml,
       # mounted below) OR via these per-concern env vars. If BOTH are present,
       # an env var OVERRIDES that concern's section in the config file.
@@ -36,13 +38,21 @@ services:
       # Titles. Token: original. Script classes allowed (cjk/han/kana/hangul,
       # latin, cyrillic, ...). Specific keys MUST come before broader ones.
       # - TITLE_RULES=jpn:original;cjk:eng;default:original
+      # Logos (Plex "clearLogo" -- the title artwork overlaid on the backdrop,
+      # shown INSTEAD of the text title when present). Tokens: original,
+      # textless, off (clear the logo so the text title shows).
+      # - LOGO_RULES=default:eng,original
+      # Backdrops (Plex "art" -- the page background). Tokens: original,
+      # textless (usually what you want -- a clean, text-free image).
+      # - BACKDROP_RULES=default:textless,original
 
-      # Don't overwrite posters/titles YOU locked by hand in Plex. Babelarr
-      # still re-manages its own values. Values: true (both, default) | false
-      # (neither) | poster | title | poster,title.
+      # Don't overwrite posters/titles/logos/backdrops YOU locked by hand in
+      # Plex. Babelarr still re-manages its own values. Values: true (all,
+      # default) | false (none) | any comma-separated subset of
+      # poster,title,logo,backdrop.
       - SKIP_USER_LOCKED=true
-      # How Babelarr remembers which locked posters/titles are its own.
-      # REQUIRED when poster or title rules are used. No default (impactful).
+      # How Babelarr remembers which locked fields are its own. REQUIRED when
+      # poster/title/logo/backdrop rules are used. No default (impactful).
       #   file   -> JSON state file (invisible to Plex); see STATE_FILE below
       #   labels -> fingerprint labels on each Plex item (visible in Plex UI)
       - STATE_PERSISTENCE=file
