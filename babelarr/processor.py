@@ -27,6 +27,7 @@ from .plex_client import (
     _SHOW,
     _audio_views,
     _subtitle_views,
+    PlexFeatureUnsupported,
     apply_backdrop,
     apply_logo,
     apply_poster,
@@ -265,6 +266,10 @@ class Processor:
                 if key:
                     apply_logo(item, key, self.config.skip_user_locked,
                                self.state, self.config.dry_run)
+            except PlexFeatureUnsupported as exc:
+                # Older Plex server lacks the operation -> one clear line, no
+                # scary traceback. Warn once per item; the sweep continues.
+                log.warning("%s", exc)
             except Exception:  # pragma: no cover - defensive
                 log.exception("Failed logo for %s", getattr(item, "title", "?"))
 
@@ -276,6 +281,8 @@ class Processor:
                 if key:
                     apply_backdrop(item, key, self.config.skip_user_locked,
                                    self.state, self.config.dry_run)
+            except PlexFeatureUnsupported as exc:
+                log.warning("%s", exc)
             except Exception:  # pragma: no cover - defensive
                 log.exception("Failed backdrop for %s", getattr(item, "title", "?"))
 

@@ -22,6 +22,19 @@ if TYPE_CHECKING:  # import only for type hints; avoids a hard requests dependen
 
 log = logging.getLogger("babelarr.plex")
 
+
+class PlexFeatureUnsupported(Exception):
+    """A Plex operation failed in a way that suggests the server is too old.
+
+    Newer artwork operations (notably setting/locking the ``clearLogo`` field)
+    only exist on recent Plex Media Server builds; an older server rejects them
+    with an HTTP 400 that surfaces as ``plexapi.exceptions.BadRequest``. We wrap
+    that into this clearer, actionable error (including the detected server
+    version) so the caller can log a one-line explanation instead of a scary,
+    repeating stack trace that looks like a Babelarr bug.
+    """
+
+
 _MOVIE = "movie"
 _SHOW = "show"
 
@@ -374,6 +387,42 @@ _ART_CONCERN = _ImageConcern(
 )
 
 
+def _server_version(item) -> Optional[str]:
+    """Best-effort Plex Media Server version string behind ``item`` (or None)."""
+    try:
+        return getattr(getattr(item, "_server", None), "version", None)
+    except Exception:  # pragma: no cover - defensive
+        return None
+
+
+def _run_plex_mutation(item, concern: _ImageConcern, op_label: str, fn):
+    """Run a Plex-mutating image call, translating 'too old' failures.
+
+    Newer artwork operations (e.g. setting/locking ``clearLogo``) don't exist on
+    older Plex builds, which reject them with an HTTP 400 surfacing as
+    ``plexapi.exceptions.BadRequest``. We re-raise those as
+    :class:`PlexFeatureUnsupported` (naming the concern + detected server
+    version) so the caller logs a single clear line rather than a repeating
+    traceback. Any other exception propagates unchanged.
+    """
+    try:
+        return fn()
+    except Exception as exc:  # noqa: BLE001 - re-classified below
+        # Match plexapi's BadRequest without a hard import at module load
+        # (keeps the pure-logic import graph free of plexapi) and also catch
+        # anything whose repr clearly carries the 400 signature.
+        name = type(exc).__name__
+        if name == "BadRequest" or "(400)" in str(exc) or "400 " in str(exc):
+            version = _server_version(item) or "unknown"
+            raise PlexFeatureUnsupported(
+                f"Plex rejected the {concern.skip_key} {op_label} operation "
+                f"(HTTP 400). Your Plex Media Server (version {version}) is "
+                f"likely too old to support it \u2014 updating Plex should "
+                f"resolve this. Skipping {concern.skip_key} for this item."
+            ) from exc
+        raise
+
+
 def _find_existing_image(item, concern: _ImageConcern, image_url):
     """Return an existing candidate matching ``image_url``, or None.
 
@@ -442,15 +491,14 @@ def _apply_image_off(item, concern: _ImageConcern, skip_user_locked, state,
     if dry_run:
         return True
     labels_before = _label_tags(getattr(item, "labels", None))
-    deleter = getattr(item, concern.delete, None)
-    if deleter is not None:
-        try:
+
+    def _mutate():
+        deleter = getattr(item, concern.delete, None)
+        if deleter is not None:
             deleter()
-        except Exception:  # pragma: no cover - network/plex variance
-            log.exception("  could not clear %s for %s", concern.skip_key,
-                          getattr(item, "title", "?"))
-            return False
-    getattr(item, concern.lock)()  # lock so the agent won't re-pick one
+        getattr(item, concern.lock)()  # lock so the agent won't re-pick one
+
+    _run_plex_mutation(item, concern, "clear", _mutate)
     try:
         item.reload()
     except Exception:  # pragma: no cover - defensive
@@ -517,13 +565,17 @@ def _apply_image(item, concern: _ImageConcern, image_url, skip_user_locked, stat
     # never be removed and duplicates would accumulate. So we pass these
     # pre-reload tags into record/clear so the self-heal sees the true state.
     labels_before = _label_tags(getattr(item, "labels", None))
-    if existing is not None:
-        # Wanted image is already a candidate (e.g. a TMDB image Plex knows)
-        # -- select it instead of re-downloading/uploading.
-        getattr(item, concern.set)(existing)
-    else:
-        getattr(item, concern.upload)(url=image_url)
-    getattr(item, concern.lock)()
+
+    def _mutate():
+        if existing is not None:
+            # Wanted image is already a candidate (e.g. a TMDB image Plex knows)
+            # -- select it instead of re-downloading/uploading.
+            getattr(item, concern.set)(existing)
+        else:
+            getattr(item, concern.upload)(url=image_url)
+        getattr(item, concern.lock)()
+
+    _run_plex_mutation(item, concern, verb, _mutate)
     try:
         item.reload()
     except Exception:  # pragma: no cover - defensive

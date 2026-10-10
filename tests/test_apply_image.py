@@ -12,8 +12,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import pytest  # noqa: E402
+
 from babelarr.image_selector import SELECT_OFF  # noqa: E402
-from babelarr.plex_client import apply_backdrop, apply_logo  # noqa: E402
+from babelarr.plex_client import (  # noqa: E402
+    PlexFeatureUnsupported,
+    apply_backdrop,
+    apply_logo,
+)
 from babelarr.state import LabelState  # noqa: E402
 
 
@@ -44,6 +50,8 @@ class FakeImageItem:
         self.ratingKey = "1"
         self.guids = []
         self.guid = None
+        # Stand-in for the PlexServer handle; _server_version reads .version.
+        self._server = type("FakeServer", (), {"version": "1.40.0.1000"})()
         self._fields = []
         if logo_locked:
             self._fields.append(FakeField("clearLogo", True))
@@ -285,3 +293,54 @@ def test_logo_and_backdrop_are_independent():
     assert item.art_selects == [] and item.art_uploads == []
     apply_backdrop(item, ART_URL, {"logo", "backdrop"}, st, dry_run=False)
     assert item.logo_selects == [LOGO_URL]  # unchanged from the first call
+
+
+# --- safety net: an old Plex server that doesn't support the operation ------
+# Newer artwork ops (e.g. locking clearLogo) 400 on older servers, surfacing as
+# plexapi BadRequest. Babelarr must translate that into a clear, actionable
+# PlexFeatureUnsupported (naming the detected server version) rather than let a
+# raw traceback repeat every sweep. A non-400 error must still propagate as-is.
+
+class FakeBadRequest(Exception):
+    """Stand-in for plexapi.exceptions.BadRequest (matched by class name)."""
+
+
+class OldServerLogoItem(FakeImageItem):
+    """lockLogo() 400s, like a Plex build predating clearLogo lock support."""
+
+    def lockLogo(self):
+        raise FakeBadRequest("(400) bad_request: clearLogo.locked=1")
+
+
+def test_old_server_logo_lock_raises_feature_unsupported_with_version():
+    item = OldServerLogoItem(logo_candidates=[])  # not a candidate -> upload+lock
+    st = LabelState()
+    with pytest.raises(PlexFeatureUnsupported) as ei:
+        apply_logo(item, LOGO_URL, {"logo"}, st, dry_run=False)
+    msg = str(ei.value)
+    assert "1.40.0.1000" in msg          # detected server version is reported
+    assert "too old" in msg.lower()
+    assert "logo" in msg.lower()
+
+
+def test_old_server_logo_off_raises_feature_unsupported():
+    sel = FakeImage(LOGO_URL, selected=True)
+    item = OldServerLogoItem(logo_candidates=[sel])
+    st = LabelState()
+    with pytest.raises(PlexFeatureUnsupported):
+        apply_logo(item, SELECT_OFF, {"logo"}, st, dry_run=False)
+
+
+class ServerErrorLogoItem(FakeImageItem):
+    """lockLogo() fails with a NON-400 error (e.g. a transient server fault)."""
+
+    def lockLogo(self):
+        raise RuntimeError("500 internal server error")
+
+
+def test_non_400_lock_error_propagates_unchanged():
+    item = ServerErrorLogoItem(logo_candidates=[])
+    st = LabelState()
+    # Not a 'too old' signal -> must NOT be swallowed/reclassified.
+    with pytest.raises(RuntimeError):
+        apply_logo(item, LOGO_URL, {"logo"}, st, dry_run=False)
