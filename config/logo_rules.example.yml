@@ -9,12 +9,9 @@
 # TIP: most people want these rules set the SAME as TITLE_RULES -- the logo is
 # just a pictorial version of the display title, so the two should agree.
 #
-# NOTE ON SOURCING: unlike posters, Plex does NOT fetch movie logos from TMDB
-# (its logo provider offers a different, smaller set). Babelarr instead reads
-# logos straight from TMDB's API and UPLOADS the chosen one to Plex. So a logo
-# appears only if TMDB has one in a language your rule accepts; because Plex's
-# own candidates aren't TMDB URLs, Babelarr always uploads (deduplicated by its
-# fingerprint state, so no re-upload of an unchanged logo each sweep).
+# Logos come from TMDB (via the item's tmdb:// guid), same as posters. A logo
+# is set only if TMDB has one in a language your rule accepts; if not, or if no
+# rule matches the title, the logo is LEFT AS PLEX HAS IT.
 #
 # Rules are an ORDERED list, evaluated TOP TO BOTTOM, first match wins (see the
 # subtitle example for the full semantics). Each key is a title's PRODUCTION

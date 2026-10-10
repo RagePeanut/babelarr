@@ -461,25 +461,15 @@ Keyed by the title's **production language** (TMDB `original_language`).
 Preferences are logo languages; `original` resolves to that production language,
 `textless` matches TMDB's no-language logos, and `off` **clears the logo
 entirely** so Plex falls back to the text title. Among candidates for a given
-preference, the highest-voted logo on TMDB is chosen. When Babelarr sets (or
-clears) a logo it **locks** the field so Plex's agent won't re-pick one, and
-fingerprints the result (same ownership model as posters).
+preference, the highest-voted logo on TMDB is chosen; if it is already one of
+the item's logo candidates it is **selected**, otherwise **uploaded**. When
+Babelarr sets (or clears) a logo it **locks** the field so Plex's agent won't
+re-pick one, and fingerprints the result (same ownership model as posters).
 
-> **Where logos come from — Babelarr uses TMDB; Plex normally doesn't.** Unlike
-> posters (which the Plex Movie agent fetches from TMDB), **Plex does not source
-> movie logos from TMDB** — its logo provider offers a different, smaller set,
-> which is why a logo you can see on TMDB often isn't among Plex's own logo
-> choices. Babelarr sidesteps this by reading logos straight from **TMDB's API**
-> and **uploading** the chosen one to Plex (automating the usual manual
-> workaround of downloading a TMDB logo and dropping it next to the file). A
-> practical consequence: because Plex's existing logo candidates aren't TMDB
-> URLs, the "select an existing candidate" shortcut used for posters essentially
-> never applies to logos — Babelarr **uploads** every logo. That's harmless
-> (uploads are deduplicated by Babelarr's fingerprint state, so it won't
-> re-upload an unchanged logo each sweep), just worth knowing. It also means a
-> logo only appears if **TMDB** has one in a language your rule accepts; with
-> `default:[eng, original]`, a title with no English TMDB logo falls back to the
-> production-language one, and a title with no TMDB logo at all is left as-is.
+Like every concern, a logo rule only ever acts on what it explicitly matches:
+if the matched preference list has no available logo on TMDB, or no rule matches
+the title at all, the logo is **left exactly as Plex has it** — Babelarr adds no
+behavior of its own beyond the languages you list.
 
 ```
 # Prefer the English logo, else the original-language one
