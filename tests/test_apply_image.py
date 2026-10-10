@@ -285,3 +285,60 @@ def test_logo_and_backdrop_are_independent():
     assert item.art_selects == [] and item.art_uploads == []
     apply_backdrop(item, ART_URL, {"logo", "backdrop"}, st, dry_run=False)
     assert item.logo_selects == [LOGO_URL]  # unchanged from the first call
+
+
+# --- regression: Plex rejects locking clearLogo with HTTP 400 --------------
+# plexapi's lockLogo() issues clearLogo.locked=1, which some Plex servers
+# reject with 400 Bad Request (the field has no lock mechanism). The upload
+# succeeds first, so a 400 at the lock step must NOT abort the apply or we'd
+# fail to record state and re-upload every sweep.
+
+class FakeBadRequest(Exception):
+    """Stand-in for plexapi.exceptions.BadRequest."""
+
+
+class LogoLockRejectsItem(FakeImageItem):
+    """A movie whose lockLogo() raises 400 (but art lock still works)."""
+
+    def lockLogo(self):
+        raise FakeBadRequest("(400) bad_request: clearLogo.locked=1")
+
+
+def test_logo_upload_survives_unlockable_clearLogo_field():
+    item = LogoLockRejectsItem(logo_candidates=[])  # not a candidate -> upload
+    st = LabelState()
+    changed = apply_logo(item, LOGO_URL, {"logo"}, st, dry_run=False)
+    assert changed                       # not aborted by the lock 400
+    assert item.logo_uploads == [LOGO_URL]
+    # State recorded despite the failed lock -> no re-upload next sweep.
+    assert _has_label(item, "clearLogo")
+    assert _has_label(item, "clearLogo-url")
+
+
+def test_logo_off_survives_unlockable_clearLogo_field():
+    sel = FakeImage(LOGO_URL, selected=True)
+    item = LogoLockRejectsItem(logo_candidates=[sel])
+    st = LabelState()
+    changed = apply_logo(item, SELECT_OFF, {"logo"}, st, dry_run=False)
+    assert changed
+    assert item.logo_deleted             # cleared
+    assert st.is_ours(item, "clearLogo", "babelarr:off")  # state still recorded
+
+
+class ArtLockRejectsItem(FakeImageItem):
+    """Backdrops ARE lockable; a lock failure here must still propagate."""
+
+    def lockArt(self):
+        raise FakeBadRequest("(400) bad_request")
+
+
+def test_backdrop_lock_failure_propagates():
+    # art is a lockable field, so a lock error is a real failure, not tolerated.
+    item = ArtLockRejectsItem(art_candidates=[])
+    st = LabelState()
+    try:
+        apply_backdrop(item, ART_URL, {"backdrop"}, st, dry_run=False)
+    except FakeBadRequest:
+        pass
+    else:
+        raise AssertionError("expected the art lock failure to propagate")
